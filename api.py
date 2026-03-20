@@ -227,17 +227,6 @@ async def open_editor(request):
         return web.json_response({"status": "ok"})
     return web.json_response({"status": "error"}, status=404)
 
-#---------------
-
-def load_train_config():
-    try:
-        with open(TRAIN_CONFIG_FILE_PATH, 'r', encoding='utf-8') as file:
-            return yaml.safe_load(file) or {}
-    except Exception:
-        logger.exception(f"[GadgetNodes] An error occured during read {TRAIN_CONFIG_FILE_PATH}.")
-    return {}
-
-train_config = load_train_config()
 
 @PromptServer.instance.routes.get("/gadget_nodes/train/get_images")
 async def get_images(request):
@@ -270,4 +259,13 @@ async def save_tags(request):
     data = await request.json()
     path = os.path.join(data['folder'], os.path.splitext(data['filename'])[0] + ".txt")
     with open(path, "w", encoding="utf-8") as f: f.write(data['tags'])
+    return web.json_response({"status": "ok"})
+
+
+@PromptServer.instance.routes.post("/gadget_nodes/crop_callback")
+async def crop_callback(request):
+    json_data = await request.json()
+    node_id = json_data.get("node_id")
+    results = json_data.get("results")
+    crop_results[node_id] = results
     return web.json_response({"status": "ok"})

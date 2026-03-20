@@ -15,6 +15,7 @@ NODE_CLASS_MAPPINGS = {
     "Prompt Palette": PromptPaletteNode,
     "Select Input Folder": InputFolderSelectNode,
     "Edit Train Tags": TrainTagsEditNode,
+    "Crop Images(Manual)": ManualCropImagesNode, 
 }
 
 WEB_DIRECTORY = "./js"

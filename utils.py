@@ -1,4 +1,4 @@
-import os
+import os,yaml
 from logging import getLogger
 
 PROMPT_PATH = os.path.join(os.path.dirname(os.path.realpath(__file__)), "prompt")
@@ -28,3 +28,16 @@ def flatten(any_list:list):
             else:
                 result.append(item)
     return result
+
+def load_train_config():
+    try:
+        with open(TRAIN_CONFIG_FILE_PATH, 'r', encoding='utf-8') as file:
+            return yaml.safe_load(file) or {}
+    except Exception:
+        logger.exception(f"[GadgetNodes] An error occured during read {TRAIN_CONFIG_FILE_PATH}.")
+    return {}
+
+train_config = load_train_config()
+
+# グローバル変数で結果を一時保持
+crop_results = {}

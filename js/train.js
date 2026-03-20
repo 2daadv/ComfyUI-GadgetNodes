@@ -8,7 +8,7 @@ app.registerExtension({
 
         // --- データ更新用関数 ---
         const updateAll = async (node, canvas, midList, rightList) => {
-            const folder = node.widgets.find(w => w.name === "folder_path").value;
+            const folder = node.widgets.find(w => w.name === "folder").value;
             const imageWidget = node.widgets.find(w => w.name === "selected_image");
             
             if (!folder) return;
@@ -127,7 +127,7 @@ app.registerExtension({
             node.addDOMWidget("main_editor_ui", "div", mainView);
 
             // --- ウィジェットの引っ越し (tags_inputのみ) ---
-            const folderWidget = node.widgets.find(w => w.name === "folder_path");
+            const folderWidget = node.widgets.find(w => w.name === "folder");
             const imageWidget = node.widgets.find(w => w.name === "selected_image");
             const tagsWidget = node.widgets.find(w => w.name === "tags_input");
 
@@ -164,7 +164,7 @@ app.registerExtension({
                     }
                 });
 
-                // 複数画像に同じプロンプトを追加する用途を考え、入力欄をクリアはしない
+                // 複数画像に同じキャプションを追加する用途を考え、入力欄をクリアはしない
                 // tagsWidget.value = "";
                 // if (tagsWidget.inputEl) tagsWidget.inputEl.value = "";
             };
