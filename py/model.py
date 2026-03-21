@@ -14,7 +14,7 @@ DEFAULT_PRESET = {
     "steps": 30,
     "cfg": 7,
     "sampler_name": comfy.samplers.SAMPLER_NAMES[0],
-    "scheduler_name": comfy.samplers.SCHEDULER_NAMES[0],
+    "scheduler": comfy.samplers.SCHEDULER_NAMES[0],
     "positive": "",
     "negative": "",
 }
@@ -32,7 +32,7 @@ class CheckpointPresetLoaderNode:
                 "steps": ("INT", {"default": 30, "min": 1, "max": MAX_RESOLUTION, "step": 1}),
                 "cfg": ("FLOAT", {"default": 7.0, "min": 0.0, "max": 100.0, "step": 0.1}),
                 "sampler_name": (comfy.samplers.SAMPLER_NAMES,),
-                "scheduler_name": (comfy.samplers.SCHEDULER_NAMES,),
+                "scheduler": (comfy.samplers.SCHEDULER_NAMES,),
             },
             "optional": {
                 "positive": ("STRING", {"default": "", "multiline": True}),
@@ -40,13 +40,13 @@ class CheckpointPresetLoaderNode:
                 "preset_name": ("STRING", {"default": "", "multiline": False}),
             }
         }
-    RETURN_TYPES = (any_type, any_type, "INT", "INT", "FLOAT", comfy.samplers.KSampler.SAMPLERS, comfy.samplers.SCHEDULER_NAMES, "STRING", "STRING")
-    RETURN_NAMES = ("ckpt_name", "vae_name", "clip_skip", "steps", "cfg", "sampler_name", "scheduler_name", "positive", "negative")
+    RETURN_TYPES = (any_type, any_type, "INT", "INT", "FLOAT", any_type, any_type, "STRING", "STRING")
+    RETURN_NAMES = ("ckpt_name", "vae_name", "clip_skip", "steps", "cfg", "sampler_name", "scheduler", "positive", "negative")
     FUNCTION = "run"
     CATEGORY = CATEGORY_MODEL
 
-    def run(self, ckpt_name, vae_name, clip_skip, steps, cfg, sampler_name, scheduler_name, positive="", negative="", preset_name=None):
-        return (ckpt_name, vae_name, clip_skip, steps, cfg, sampler_name, scheduler_name, positive, negative)
+    def run(self, ckpt_name, vae_name, clip_skip, steps, cfg, sampler_name, scheduler, positive="", negative="", preset_name=None):
+        return (ckpt_name, vae_name, clip_skip, steps, cfg, sampler_name, scheduler, positive, negative)
 
 
 def get_ckpt_preset(ckpt_name):

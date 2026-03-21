@@ -1,4 +1,5 @@
-import io,base64
+import base64
+import numpy as np
 from io import BytesIO
 from PIL import Image
 from pathlib import Path
@@ -52,3 +53,21 @@ def process_thumbnail(img_path, max_size=(300, 300)):
     except:
         return None
 
+def unpack_images(images):
+    # List入力を受け付けるノードで、IMAGESを引数に取る場合にComfyUIの仕様で次元が増えていることがあるので、不要な次元を削る。
+    unpacked_images = []
+    for img in images:
+        # CPUのnumpy配列に変換（処理しやすくするため）
+        img_np = img.cpu().numpy()
+        # (1, 1, H, W, 3) などの余計な次元をすべて剥ぎ取る
+        while img_np.ndim > 3:
+            img_np = img_np[0]
+        # もし (H, W, 3) に満たない（モノクロなど）場合はエラーを防ぐため再構築
+        if img_np.ndim == 2:
+            img_np = np.stack([img_np] * 3, axis=-1)
+        unpacked_images.append(img_np)
+    return unpacked_images
+
+def unpack_list(any_list):
+    # List入力を受け付けるノードでComfyUIの仕様で次元が増えていることがあるので、不要な次元を削る
+    return any_list[0] if isinstance(any_list, list) else any_list
