@@ -51,8 +51,8 @@ class ManualCropImagesNode:
             i = Image.fromarray((img.cpu().numpy() * 255).astype('uint8'))
             i.thumbnail((400, 400))
             buffer = BytesIO()
-            i.save(buffer, format="JPEG", quality=80)
-            preview_imgs.append(f"data:image/jpeg;base64,{base64.b64encode(buffer.getvalue()).decode('utf-8')}")
+            i.save(buffer, format="WebP", quality=85)
+            preview_imgs.append(f"data:image/webp;base64,{base64.b64encode(buffer.getvalue()).decode('utf-8')}")
 
         PromptServer.instance.send_sync("gadget.show_crop_dialog", {
             "node_id": node_id,

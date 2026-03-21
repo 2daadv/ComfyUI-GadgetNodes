@@ -1,11 +1,12 @@
-import io,yaml,base64
+import io,base64
+from io import BytesIO
 from PIL import Image
 from pathlib import Path
 from logging import getLogger
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-logger = getLogger("GadgetNodes")
+logger = getLogger("ComfyUI.GadgetNodes")
 
 class AnyType(str):
     def __eq__(self, _):
@@ -43,10 +44,10 @@ def process_thumbnail(img_path, max_size=(300, 300)):
     try:
         with Image.open(img_path) as img:
             img.thumbnail(max_size)
-            buffered = io.BytesIO()
+            buffer = BytesIO()
             # 内部処理はWebPに統一して軽量化
-            img.save(buffered, format="WebP", quality=85)
-            img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+            img.save(buffer, format="WebP", quality=85)
+            img_str = base64.b64encode(buffer.getvalue()).decode("utf-8")
             return f"data:image/webp;base64,{img_str}"
     except:
         return None

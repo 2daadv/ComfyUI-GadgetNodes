@@ -1,5 +1,5 @@
 from __future__ import annotations
-import re,os,subprocess
+import re,os,yaml,subprocess
 from .utils import *
 from aiohttp import web
 from server import PromptServer
@@ -105,6 +105,7 @@ async def get_prompts(request):
     
     file_path = os.path.join(PROMPT_PATH, file_name)
     if not os.path.exists(file_path):
+        logger.warning(f"[GadgetNodes] '{file_path}' not found.")
         return web.json_response({"error": "File not found"}, status=404)
     
     try:
@@ -112,6 +113,7 @@ async def get_prompts(request):
             data = yaml.safe_load(f)
         return web.json_response(data)
     except Exception as e:
+        logger.exception(f"[GadgetNodes] Can't read '{file_path}'.")
         return web.json_response({"error": str(e)}, status=500)
 
 
@@ -127,4 +129,5 @@ async def open_editor(request):
         elif os.name == 'posix':  # macOS / Linux
             subprocess.call(('open' if os.sys.platform == 'darwin' else 'xdg-open', file_path))
         return web.json_response({"status": "ok"})
+    logger.warning(f"[GadgetNodes] Can't open '{file_path}'.")
     return web.json_response({"status": "error"}, status=404)

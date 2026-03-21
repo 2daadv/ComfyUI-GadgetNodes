@@ -1,5 +1,5 @@
 from __future__ import annotations
-import re,json,os
+import re,json,os,yaml
 import folder_paths
 import comfy.samplers
 from aiohttp import web
@@ -68,7 +68,7 @@ def get_ckpt_preset(ckpt_name):
                     "negative": str(result.get("negative", "")).replace(k, v)
                 }
     except Exception:
-        logger.exception(f"[GadgetNodes] An error occured during read {MODELS_CONFIG_FILE_PATH}.")
+        logger.exception(f"[GadgetNodes] Can't read {MODELS_CONFIG_FILE_PATH}.")
     result["preset_name"] = ", ".join(preset_names)
     return DEFAULT_PRESET | result
 
@@ -168,6 +168,7 @@ async def save_lora_info(request):
             json.dump(save_data, f, indent=4, ensure_ascii=False)
         return web.json_response({"status": "success"})
     except Exception as e:
+        logger.exception(f"[GadgetNodes] Can't write {json_path}.")
         return web.json_response({"error": str(e)}, status=500)
 
 
@@ -249,4 +250,5 @@ async def save_ckpt_info(request):
             json.dump(save_data, f, indent=4, ensure_ascii=False)
         return web.json_response({"status": "success"})
     except Exception as e:
+        logger.exception(f"[GadgetNodes] Can't write {json_path}.")
         return web.json_response({"error": str(e)}, status=500)

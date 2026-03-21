@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os
+import os,yaml
 from .utils import *
 from server import PromptServer
 from aiohttp import web
@@ -12,7 +12,7 @@ def load_train_config():
         with open(TRAIN_CONFIG_FILE_PATH, 'r', encoding='utf-8') as file:
             return yaml.safe_load(file) or {}
     except Exception:
-        logger.exception(f"[GadgetNodes] An error occured during read {TRAIN_CONFIG_FILE_PATH}.")
+        logger.exception(f"[GadgetNodes] Can't read {TRAIN_CONFIG_FILE_PATH}.")
     return {}
 
 train_config = load_train_config()
