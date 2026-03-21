@@ -85,14 +85,23 @@ class ManualCropImagesNode:
         for i in range(total):
             if comfy.model_management.processing_interrupted():
                 return ([ExecutionBlocker(None)],)
-            img = images[i]
-            h, w, _ = img.shape
             c = reply[i]
-            x, y = int(c['x'] * w), int(c['y'] * h)
-            cw, ch = int(c['w'] * w), int(c['h'] * h)
-            cropped_np = img[y:y+ch, x:x+cw, :]
-            cropped_tensor = torch.from_numpy(cropped_np)
-            output_list.append(cropped_tensor.unsqueeze(0))
+            rx = c['x']
+            ry = c['y']
+            rw = c['w']
+            rh = c['h']
+            img = images[i]
+            if rx < 0.001 and 0.999 < rw and ry < 0.001 and 0.999 < rh:
+                output_list.append(torch.from_numpy(img).unsqueeze(0))
+            else:
+                h, w, _ = img.shape
+                x = max(0, min(int(rx * w), w - 1))
+                y = max(0, min(int(ry * h), h - 1))
+                cw = max(1, min(int(rw * w), w - x))
+                ch = max(1, min(int(rh * h), h - y))
+                cropped_np = img[y:y+ch, x:x+cw, :]
+                cropped_tensor = torch.from_numpy(cropped_np)
+                output_list.append(cropped_tensor.unsqueeze(0))
             pbar.update_absolute(i + 1, total)
 
         return (output_list,)

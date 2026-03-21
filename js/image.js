@@ -9,34 +9,50 @@ if (!document.getElementById("gadget-crop-style")) {
     style.textContent = `
         .crop-modal-overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.7); z-index: 10001; 
+            background: rgba(0,0,0,0.7); z-index: 10001;
             display: flex; justify-content: center; align-items: center;
         }
         .crop-dialog-box {
             width: 80vw; height: 80vh; min-width: 400px; min-height: 300px;
-            background: #1a1a1a; border: 2px solid #555; border-radius: 8px; 
-            display: flex; flex-direction: column; overflow: hidden; 
+            background: #1a1a1a; border: 2px solid #555; border-radius: 8px;
+            display: flex; flex-direction: column; overflow: hidden;
             box-shadow: 0 0 40px rgba(0,0,0,0.8);
-            resize: both; /* ダイアログ自体をリサイズ可能に */
+            resize: both;
         }
         .crop-modal-content {
-            flex: 1; overflow-y: auto; display: grid; 
-            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); 
+            flex: 1; overflow-y: auto; display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
             gap: 15px; padding: 20px; background: #111;
         }
         .crop-thumb-container { position: relative; border: 1px solid #444; background: #000; height: 200px; cursor: pointer; }
         .crop-thumb-img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
         .crop-thumb-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
-        
         .crop-editor-popup {
             position: fixed; top: 5%; left: 5%; width: 90%; height: 90%;
             background: #000; border: 1px solid #999; z-index: 10005;
             display: none; flex-direction: column; box-shadow: 0 0 50px #000;
         }
         .crop-canvas-wrapper { flex: 1; position: relative; display: flex; justify-content: center; align-items: center; overflow: hidden; }
-        .crop-footer { padding: 12px; background: #222; text-align: right; border-top: 1px solid #444; }
+        .crop-controls { padding: 10px 20px; background: #222; border-bottom: 1px solid #444; display: flex; align-items: center; gap: 20px; }
+        .crop-control-item { display: flex; align-items: center; gap: 8px; color: #ccc; font-size: 14px; }
+        .crop-footer {
+            padding: 12px 20px;
+            background: #222;
+            border-top: 1px solid #444;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .crop-footer-left { display: flex; align-items: center; gap: 20px; }
+        .crop-footer-right {
+            display: flex;
+            align-items: center;
+            gap: 10px; /* ボタン間の隙間 */
+            margin-left: auto; /* 左側に要素がない場合も右寄せにする */
+        }
         .crop-btn { margin-left: 10px; padding: 8px 20px; cursor: pointer; border: 1px solid #555; background: #333; color: white; }
         .crop-btn-primary { background: #2a2; border-color: #3b3; }
+        .crop-btn-secondary { background: #444; border-color: #666; }
     `;
     document.head.appendChild(style);
 }
@@ -63,22 +79,21 @@ class CropDialog {
         if (prev && prev.hash === this.image_hash && prev.ratio === this.aspect_ratio) {
             this.results = JSON.parse(JSON.stringify(prev.results));
         } else {
-            this.results = this.images.map(() => ({ x: 0.1, y: 0.1, w: 0.8, h: 0.8 })); // 仮初期化
+            this.results = this.images.map(() => ({ x: 0.1, y: 0.1, w: 0.8, h: 0.8 }));
         }
         this.initUI();
     }
 
-    // 正確な初期アスペクト比を計算（画像サイズ確定後に実行）
     calculateInitialCrop(imgW, imgH) {
         if (this.aspect_ratio === "Any") return { x: 0.1, y: 0.1, w: 0.8, h: 0.8 };
         const [rw, rh] = this.aspect_ratio.split(':').map(Number);
         const targetR = rw / rh;
         const imgR = imgW / imgH;
-        
+
         let w, h;
-        if (targetR > imgR) { // 横長ターゲット
+        if (targetR > imgR) {
             w = 0.8; h = (w / targetR) * imgR;
-        } else { // 縦長ターゲット
+        } else {
             h = 0.8; w = (h * targetR) / imgR;
         }
         return { x: (1 - w) / 2, y: (1 - h) / 2, w, h };
@@ -94,7 +109,7 @@ class CropDialog {
         dialog.className = 'crop-dialog-box';
         const content = document.createElement('div');
         content.className = 'crop-modal-content';
-        
+
         this.images.forEach((src, i) => {
             const div = document.createElement('div');
             div.className = 'crop-thumb-container';
@@ -107,7 +122,6 @@ class CropDialog {
             content.appendChild(div);
 
             img.onload = () => {
-                // 初回のみ比率を計算
                 if (!GLOBAL_CROP_STATES[this.node_id] || GLOBAL_CROP_STATES[this.node_id].ratio !== this.aspect_ratio) {
                     this.results[i] = this.calculateInitialCrop(img.naturalWidth, img.naturalHeight);
                 }
@@ -117,9 +131,19 @@ class CropDialog {
 
         const footer = document.createElement('div');
         footer.className = 'crop-footer';
-        const ok = document.createElement('button'); ok.className="crop-btn crop-btn-primary"; ok.innerText = "OK"; ok.onclick = () => this.finish(true);
-        const cl = document.createElement('button'); cl.className="crop-btn"; cl.innerText = "Cancel"; cl.onclick = () => this.finish(false);
-        footer.append(ok, cl);
+        // 右側に寄せるためのコンテナ
+        const footRight = document.createElement('div');
+        footRight.className = 'crop-footer-right';
+        const ok = document.createElement('button');
+        ok.className="crop-btn crop-btn-primary";
+        ok.innerText = "OK";
+        ok.onclick = () => this.finish(true);
+        const cancel = document.createElement('button');
+        cancel.className="crop-btn";
+        cancel.innerText = "Cancel";
+        cancel.onclick = () => this.finish(false);
+        footRight.append(ok, cancel);
+        footer.append(footRight);
         dialog.append(content, footer);
         this.overlay.append(dialog);
         document.body.appendChild(this.overlay);
@@ -131,9 +155,11 @@ class CropDialog {
         const ctx = canvas.getContext('2d');
         const container = canvas.parentElement;
         const img = container.querySelector('img');
+        if (!img.naturalWidth) return;
+
         const containerRatio = container.clientWidth / container.clientHeight;
         const imgRatio = img.naturalWidth / img.naturalHeight;
-        
+
         let dW, dH, oX, oY;
         if (imgRatio > containerRatio) { dW = container.clientWidth; dH = dW / imgRatio; oX = 0; oY = (container.clientHeight - dH) / 2; }
         else { dH = container.clientHeight; dW = dH * imgRatio; oX = (container.clientWidth - dW) / 2; oY = 0; }
@@ -147,17 +173,62 @@ class CropDialog {
     initEditor() {
         this.popup = document.createElement('div');
         this.popup.className = 'crop-editor-popup';
+
         const wrapper = document.createElement('div');
         wrapper.className = 'crop-canvas-wrapper';
         this.canvas = document.createElement('canvas');
         wrapper.appendChild(this.canvas);
+
         const foot = document.createElement('div');
         foot.className = 'crop-footer';
-        const ok = document.createElement('button'); ok.className="crop-btn crop-btn-primary"; ok.innerText = "OK";
+
+        // --- 左側：操作系 ---
+        const footLeft = document.createElement('div');
+        footLeft.className = 'crop-footer-left';
+
+        // チェックボックス
+        const lockItem = document.createElement('div');
+        lockItem.className = 'crop-control-item';
+        this.aspectLock = document.createElement('input');
+        this.aspectLock.type = 'checkbox';
+        this.aspectLock.id = 'crop-aspect-lock';
+        const lockLabel = document.createElement('label');
+        lockLabel.htmlFor = 'crop-aspect-lock';
+        lockLabel.innerText = 'Keep Aspect Ratio';
+        lockItem.append(this.aspectLock, lockLabel);
+
+        // 全選択
+        const selectAllBtn = document.createElement('button');
+        selectAllBtn.className = 'crop-btn crop-btn-secondary';
+        selectAllBtn.innerText = 'Select ALL';
+        selectAllBtn.onclick = () => {
+            this.results[this.currentIndex] = { x: 0, y: 0, w: 1, h: 1 };
+            this.aspectLock.checked = false;
+            this.render();
+        };
+        footLeft.append(lockItem, selectAllBtn);
+
+        // --- 右側：決定系 ---
+        const footRight = document.createElement('div');
+        footRight.className = 'crop-footer-right';
+
+        const ok = document.createElement('button');
+        ok.className="crop-btn crop-btn-primary";
+        ok.innerText = "OK";
         ok.onclick = () => { this.popup.style.display = 'none'; this.refreshGrid(); };
-        const cl = document.createElement('button'); cl.className="crop-btn"; cl.innerText = "Cancel";
-        cl.onclick = () => { this.results[this.currentIndex] = JSON.parse(this.backup); this.popup.style.display = 'none'; };
-        foot.append(ok, cl);
+
+        const cl = document.createElement('button');
+        cl.className="crop-btn"; 
+        cl.innerText = "Cancel";
+        cl.onclick = () => { 
+            this.results[this.currentIndex] = JSON.parse(this.backup);
+            this.popup.style.display = 'none'; 
+        };
+
+        // OKが左、Cancelが右
+        footRight.append(ok, cl);
+
+        foot.append(footLeft, footRight);
         this.popup.append(wrapper, foot);
         document.body.appendChild(this.popup);
         this.initEvents();
@@ -165,14 +236,21 @@ class CropDialog {
 
     openEditor(i) {
         this.currentIndex = i;
-        this.backup = JSON.stringify(this.results[i]); // キャンセル用にバックアップ
+        this.backup = JSON.stringify(this.results[i]);
         this.popup.style.display = 'flex';
+
+        // チェックボックスの状態制御
+        const isAny = this.aspect_ratio === "Any";
+        this.aspectLock.disabled = isAny;
+        this.aspectLock.checked = !isAny;
+
         this.activeImg = new Image();
         this.activeImg.src = this.images[i];
         this.activeImg.onload = () => this.render();
     }
 
     render() {
+        if (!this.activeImg) return;
         const ctx = this.canvas.getContext('2d');
         const wrap = this.canvas.parentElement;
         const scale = Math.min((wrap.clientWidth-20)/this.activeImg.width, (wrap.clientHeight-20)/this.activeImg.height);
@@ -201,13 +279,16 @@ class CropDialog {
             const m = getM(e); const c = this.results[this.currentIndex]; const b = 0.05;
             const n = Math.abs(m.y - c.y) < b, s = Math.abs(m.y - (c.y + c.h)) < b;
             const w = Math.abs(m.x - c.x) < b, o = Math.abs(m.x - (c.x + c.w)) < b;
-            const isAny = this.aspect_ratio === "Any";
+
+            // チェックボックスの状態を判定に使用
+            const isFree = !this.aspectLock.checked;
+
             if (n && w) this.canvas.style.cursor = "nw-resize";
             else if (n && o) this.canvas.style.cursor = "ne-resize";
             else if (s && w) this.canvas.style.cursor = "sw-resize";
             else if (s && o) this.canvas.style.cursor = "se-resize";
-            else if (isAny && (n || s)) this.canvas.style.cursor = "ns-resize";
-            else if (isAny && (w || o)) this.canvas.style.cursor = "ew-resize";
+            else if (isFree && (n || s)) this.canvas.style.cursor = "ns-resize";
+            else if (isFree && (w || o)) this.canvas.style.cursor = "ew-resize";
             else if (m.x > c.x && m.x < c.x + c.w && m.y > c.y && m.y < c.y + c.h) this.canvas.style.cursor = "move";
             else this.canvas.style.cursor = "default";
         };
@@ -216,15 +297,16 @@ class CropDialog {
             const m = getM(e); const c = this.results[this.currentIndex]; const b = 0.05;
             const n = Math.abs(m.y - c.y) < b, s = Math.abs(m.y - (c.y+c.h)) < b;
             const w = Math.abs(m.x - c.x) < b, o = Math.abs(m.x - (c.x+c.w)) < b;
-            const isAny = this.aspect_ratio === "Any";
+
+            const isFree = !this.aspectLock.checked;
+
             if (n && w) handle = "nw"; else if (n && o) handle = "ne";
             else if (s && w) handle = "sw"; else if (s && o) handle = "se";
-            else if (isAny && n) handle = "n"; else if (isAny && s) handle = "s";
-            else if (isAny && w) handle = "w"; else if (isAny && o) handle = "e";
+            else if (isFree && n) handle = "n"; else if (isFree && s) handle = "s";
+            else if (isFree && w) handle = "w"; else if (isFree && o) handle = "e";
             else if (m.x > c.x && m.x < c.x + c.w && m.y > c.y && m.y < c.y + c.h) handle = "move";
-            
+
             this.startX = m.x; this.startY = m.y; this.orig = {...c};
-            // 対角点の固定座標を保持
             this.anchorX = (handle.includes("w")) ? c.x + c.w : c.x;
             this.anchorY = (handle.includes("n")) ? c.y + c.h : c.y;
         };
@@ -237,23 +319,23 @@ class CropDialog {
             if (handle === "move") {
                 c.x = Math.max(0, Math.min(1 - c.w, this.orig.x + dx));
                 c.y = Math.max(0, Math.min(1 - c.h, this.orig.y + dy));
-            } else if (this.aspect_ratio === "Any") {
+            } else if (!this.aspectLock.checked) {
+                // 自由リサイズ
                 if (handle.includes("n")) { c.y = Math.max(0, Math.min(this.anchorY-0.05, this.orig.y + dy)); c.h = this.anchorY - c.y; }
                 if (handle.includes("s")) { c.h = Math.max(0.05, Math.min(1 - this.anchorY, this.orig.h + dy)); }
                 if (handle.includes("w")) { c.x = Math.max(0, Math.min(this.anchorX-0.05, this.orig.x + dx)); c.w = this.anchorX - c.x; }
                 if (handle.includes("e")) { c.w = Math.max(0.05, Math.min(1 - this.anchorX, this.orig.w + dx)); }
             } else {
+                // 固定比率リサイズ
                 const [rw, rh] = this.aspect_ratio.split(':').map(Number);
                 const ratio = (rw / rh) * (this.activeImg.height / this.activeImg.width);
-                
-                // 固定比率リサイズ：anchorX/Yを支点に計算
+
                 if (handle.includes("e")) c.w = Math.max(0.05, Math.min(1 - this.anchorX, this.orig.w + dx));
                 else if (handle.includes("w")) { c.w = Math.max(0.05, Math.min(this.anchorX, this.orig.w - dx)); c.x = this.anchorX - c.w; }
-                
+
                 c.h = c.w / ratio;
                 if (handle.includes("n")) c.y = this.anchorY - c.h;
-                
-                // 境界チェックと再計算
+
                 if (c.y < 0) { c.y = 0; c.h = this.anchorY; c.w = c.h * ratio; if (handle.includes("w")) c.x = this.anchorX - c.w; }
                 if (c.y + c.h > 1) { c.h = 1 - c.y; c.w = c.h * ratio; if (handle.includes("w")) c.x = this.anchorX - c.w; }
             }
@@ -272,6 +354,6 @@ class CropDialog {
         await api.fetchApi("/gadget_nodes/image/crop_callback", {
             method: "POST", body: JSON.stringify({ node_id: this.node_id, results: ok ? this.results : "CANCEL" })
         });
-        this.overlay.remove(); this.popup.remove();
+        this.overlay.remove(); if (this.popup) this.popup.remove();
     }
 }
