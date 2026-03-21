@@ -269,7 +269,7 @@ class CropDialog {
 
     async finish(ok) {
         if (ok) GLOBAL_CROP_STATES[this.node_id] = { hash: this.image_hash, results: this.results, ratio: this.aspect_ratio };
-        await api.fetchApi("/gadget_nodes/crop_callback", {
+        await api.fetchApi("/gadget_nodes/image/crop_callback", {
             method: "POST", body: JSON.stringify({ node_id: this.node_id, results: ok ? this.results : "CANCEL" })
         });
         this.overlay.remove(); this.popup.remove();
