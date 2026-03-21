@@ -1,5 +1,9 @@
-from . import api
-from .nodes import *
+from .py.core import *
+from .py.logic import *
+from .py.prompt import *
+from .py.model import *
+from .py.image import *
+from .py.train import *
 
 NODE_CLASS_MAPPINGS = {
     "Normalize Prompt": NormalizePromptNode,
