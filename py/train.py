@@ -26,7 +26,8 @@ class TrainTagsEditNode:
                 "selected_image": ([],), 
             },
             "optional": {
-                "tags_input": ("STRING", {"default": "", "multiline": True}),
+                "keep_tags": ("STRING", {"default": "", "multiline": True}),
+                "remove_tags": ("STRING", {"default": "", "multiline": True}),
             },
         }
     RETURN_TYPES = ("STRING",)
@@ -34,7 +35,7 @@ class TrainTagsEditNode:
     FUNCTION = "noop"
     CATEGORY = CATEGORY_TRAIN
 
-    def noop(self, folder, selected_image, tags_input=""):
+    def noop(self, folder, selected_image, keep_tags="", remove_tags=""):
         return (folder,)
 
 

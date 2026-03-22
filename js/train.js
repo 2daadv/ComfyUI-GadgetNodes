@@ -1,6 +1,45 @@
 import { app } from "/scripts/app.js";
 import { api } from "/scripts/api.js";
 
+// --- ポップアップ用のスタイル ---
+if (!document.getElementById("gadget-train-style")) {
+    const style = document.createElement('style');
+    style.id = "gadget-train-style";
+    style.textContent = `
+        .train-popup-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85); z-index: 10010;
+            display: flex; justify-content: center; align-items: center;
+            cursor: pointer;
+            visibility: hidden; opacity: 0; transition: opacity 0.2s; /* フェードイン用 */
+        }
+        .train-popup-overlay.show {
+            visibility: visible; opacity: 1;
+        }
+        .train-popup-content {
+            position: relative; /* マスクの基準点 */
+            display: flex; justify-content: center; align-items: center;
+            cursor: default;
+        }
+        .train-popup-img {
+            /* 画面内に収める主役。アスペクト比は保持される */
+            max-width: 90vw; max-height: 90vh;
+            width: auto; height: auto;
+            display: block;
+            user-select: none;
+            cursor: pointer;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+        .train-popup-mask {
+            /* JSでサイズを制御するため、初期値は適当 */
+            position: absolute; top: 0; left: 0;
+            pointer-events: none; opacity: 0.6;
+            display: none; /* 初期OFF */
+        }
+    `;
+    document.head.appendChild(style);
+}
+
 app.registerExtension({
     name: "Gadget.TrainTagsEdit",
     async beforeRegisterNodeDef(nodeType, nodeData) {
@@ -10,23 +49,23 @@ app.registerExtension({
         const updateAll = async (node, canvas, midList, rightList) => {
             const folder = node.widgets.find(w => w.name === "folder").value;
             const imageWidget = node.widgets.find(w => w.name === "selected_image");
-            
+
             if (!folder) return;
 
-            // 画像リスト更新
             const imgResp = await api.fetchApi(`/gadget_nodes/train/get_images?folder=${encodeURIComponent(folder)}`);
             const imgData = await imgResp.json();
             imageWidget.options.values = imgData.files;
 
-            // 値が不正なら先頭を選択
             if (imgData.files.length > 0 && (!imageWidget.value || !imgData.files.includes(imageWidget.value))) {
                 imageWidget.value = imgData.files[0];
             }
             if (!imageWidget.value) return;
 
-            // 詳細データ取得
             const dataResp = await api.fetchApi(`/gadget_nodes/train/get_data?folder=${encodeURIComponent(folder)}&filename=${encodeURIComponent(imageWidget.value)}`);
             const data = await dataResp.json();
+
+            // ポップアップ用にデータを保持
+            node._currentData = data;
 
             // プレビュー描画
             const ctx = canvas.getContext("2d");
@@ -42,7 +81,6 @@ app.registerExtension({
             };
             img.src = data.img;
 
-            // タグ分配
             midList.innerHTML = ""; rightList.innerHTML = "";
             data.tags.forEach((t, i) => {
                 const opt = new Option(t, i);
@@ -53,48 +91,38 @@ app.registerExtension({
 
         nodeType.prototype.onNodeCreated = function () {
             const node = this;
-            // 初期サイズの設定
-            const initialWidth = 950;
-            const initialHeight = 650;
-            node.setSize([initialWidth, initialHeight]);
+            node.setSize([950, 650]);
 
-            // --- 強制リサイズガード (Custom-Scripts対策) ---
-            const minW = 540;
-            const minH = 300;
-
+            const minW = 540, minH = 300;
             node.onResize = function(size) {
-                let needsFix = false;
-                if (size[0] < minW) { size[0] = minW; needsFix = true; }
-                if (size[1] < minH) { size[1] = minH; needsFix = true; }
-                
-                if (needsFix) {
-                    // size配列を直接書き換えることで、LiteGraphの描画ループに反映させます
-                    this.size[0] = size[0];
-                    this.size[1] = size[1];
-                }
+                if (size[0] < minW) size[0] = minW;
+                if (size[1] < minH) size[1] = minH;
+                this.size[0] = size[0]; this.size[1] = size[1];
             };
 
             // --- UI構築 ---
             const mainView = document.createElement("div");
             mainView.style.cssText = "display: flex; height: 100%; color: white; padding: 5px; gap: 10px; font-family: sans-serif; background: #222;";
-            
-            // 左ペイン (プレビュー + タグ入力)
+
             const leftPane = document.createElement("div");
             leftPane.style.cssText = "flex: 1; display: flex; flex-direction: column; border: 1px solid #444; overflow: hidden;";
-            
+
             const thumbCanvas = document.createElement("canvas");
-            thumbCanvas.style.cssText = "flex: 1; background: #000; object-fit: contain; width: 100%; min-height: 100px;";
-            
-            const tagsContainer = document.createElement("div"); 
-            tagsContainer.style.height = "100px";
-            
+            // cursorをzoom-inにしてポップアップ可能であることを示す
+            thumbCanvas.style.cssText = "flex: 1; background: #000; object-fit: contain; width: 100%; min-height: 100px; cursor: zoom-in;";
+
+            const keepTagsContainer = document.createElement("div"); keepTagsContainer.style.height = "50px";
             const btnKeep = document.createElement("button");
-            btnKeep.innerText = ">>";
+            btnKeep.innerText = ">> Keep";
             btnKeep.style.cssText = "background: #335; color: #fff; border: none; padding: 6px; cursor: pointer; font-size: 11px;";
 
-            leftPane.append(thumbCanvas, tagsContainer, btnKeep);
+            const removeTagsContainer = document.createElement("div"); removeTagsContainer.style.height = "50px";
+            const btnRemove = document.createElement("button");
+            btnRemove.innerText = ">> Remove";
+            btnRemove.style.cssText = "background: #335; color: #fff; border: none; padding: 6px; cursor: pointer; font-size: 11px;";
 
-            // リスト作成
+            leftPane.append(thumbCanvas, keepTagsContainer, btnKeep, removeTagsContainer, btnRemove);
+
             const createBox = (title) => {
                 const box = document.createElement("div");
                 box.style.cssText = "width: 180px; min-width: 180px; display: flex; flex-direction: column; border: 1px solid #444;";
@@ -115,61 +143,119 @@ app.registerExtension({
                 b.innerText = t; b.style.cssText = "width: 45px; height: 35px; cursor: pointer; background: #444; color: #fff; border: 1px solid #666;";
                 return b;
             };
-            const btnUp = createBtn("▲");
-            const btnRight = createBtn(">>");
-            const btnLeft = createBtn("<<");
-            const btnDown = createBtn("▼");
-            const btnSave = createBtn("Save");
+            const btnUp = createBtn("▲"), btnRight = createBtn(">>"), btnLeft = createBtn("<<"), btnDown = createBtn("▼"), btnSave = createBtn("Save");
             btnSave.style.background = "#282";
             controls.append(btnUp, btnRight, btnLeft, btnDown, btnSave);
 
             mainView.append(leftPane, mid.box, controls, right.box);
             node.addDOMWidget("main_editor_ui", "div", mainView);
 
-            // --- ウィジェットの引っ越し (tags_inputのみ) ---
             const folderWidget = node.widgets.find(w => w.name === "folder");
             const imageWidget = node.widgets.find(w => w.name === "selected_image");
-            const tagsWidget = node.widgets.find(w => w.name === "tags_input");
+            const keepTagsWidget = node.widgets.find(w => w.name === "keep_tags");
+            const removeTagsWidget = node.widgets.find(w => w.name === "remove_tags");
 
             setTimeout(() => {
-                if (tagsWidget.inputEl) {
-                    tagsWidget.inputEl.style.width = "100%";
-                    tagsWidget.inputEl.style.height = "100%";
-                    tagsContainer.appendChild(tagsWidget.inputEl);
+                if (keepTagsWidget.inputEl) {
+                    keepTagsWidget.inputEl.style.width = keepTagsWidget.inputEl.style.height = "100%";
+                    keepTagsWidget.inputEl.placeholder = "Tags to Add";
+                    keepTagsContainer.appendChild(keepTagsWidget.inputEl);
                 }
-                // tags_inputは上部に残さない
-                tagsWidget.type = "hidden";
+                if (removeTagsWidget.inputEl) {
+                    removeTagsWidget.inputEl.style.width = removeTagsWidget.inputEl.style.height = "100%";
+                    removeTagsWidget.inputEl.placeholder = "Tags to Remove";
+                    removeTagsContainer.appendChild(removeTagsWidget.inputEl);
+                }
+                keepTagsWidget.type = removeTagsWidget.type = "hidden";
             }, 100);
 
-            // コールバック
-            folderWidget.callback = () => updateAll(node, thumbCanvas, mid.list, right.list);
-            imageWidget.callback = () => updateAll(node, thumbCanvas, mid.list, right.list);
+            folderWidget.callback = imageWidget.callback = () => updateAll(node, thumbCanvas, mid.list, right.list);
 
+            // --- タグ操作ロジック ---
             btnKeep.onclick = () => {
-                if (!tagsWidget.value) return;
-
-                // 現在のKeepリストにあるタグをすべて取得してSetに格納（比較用）
-                const existingTags = new Set(
-                    Array.from(mid.list.options).map(o => o.text.trim())
-                );
-
-                // 入力された文字列をカンマで区切り、未登録のものだけを追加
-                tagsWidget.value.split(",").forEach(t => {
+                if (!keepTagsWidget.value) return;
+                const existing = new Set(Array.from(mid.list.options).map(o => o.text.trim()));
+                keepTagsWidget.value.split(",").forEach(t => {
                     const txt = t.trim();
-                    // 空文字でなく、かつ既存リストに含まれていない場合のみ追加
-                    if (txt && !existingTags.has(txt)) {
+                    if (txt && !existing.has(txt)) {
                         mid.list.add(new Option(txt, Date.now() + Math.random()));
-                        // 追加した直後のタグも一応Setに入れておく（一度に同じタグを複数入力した場合の対策）
-                        existingTags.add(txt);
+                        existing.add(txt);
                     }
                 });
-
-                // 複数画像に同じキャプションを追加する用途を考え、入力欄をクリアはしない
-                // tagsWidget.value = "";
-                // if (tagsWidget.inputEl) tagsWidget.inputEl.value = "";
             };
 
-            // 操作ロジック
+            // Removeボタンの処理：keep_tags(mid)にあればremove_tags(right)へ移動
+            btnRemove.onclick = () => {
+                if (!removeTagsWidget.value) return;
+                const targets = removeTagsWidget.value.split(",").map(t => t.trim()).filter(t => t);
+                targets.forEach(tag => {
+                    const foundOption = Array.from(mid.list.options).find(o => o.text === tag);
+                    if (foundOption) {
+                        right.list.add(foundOption); 
+                    }
+                });
+            };
+
+            // --- 画像ポップアップロジック ---
+            thumbCanvas.onclick = () => {
+                if (!node._currentData || !node._currentData.img) return;
+
+                const overlay = document.createElement("div");
+                overlay.className = "train-popup-overlay";
+
+                const content = document.createElement("div");
+                content.className = "train-popup-content";
+
+                const activeImg = document.createElement("img");
+                activeImg.src = node._currentData.img;
+                activeImg.className = "train-popup-img";
+
+                let maskImg = null;
+                const syncMaskSize = () => {
+                    if (maskImg && activeImg.complete) {
+                        maskImg.style.width = `${activeImg.clientWidth}px`;
+                        maskImg.style.height = `${activeImg.clientHeight}px`;
+                    }
+                };
+
+                if (node._currentData.mask) {
+                    maskImg = document.createElement("img");
+                    maskImg.src = node._currentData.mask;
+                    maskImg.className = "train-popup-mask";
+                    // --- 初期値をJavaScript側で明示的にセット ---
+                    maskImg.style.display = "none"; 
+                    content.appendChild(maskImg);
+                }
+
+                content.appendChild(activeImg);
+                overlay.appendChild(content);
+                document.body.appendChild(overlay);
+
+                activeImg.onload = () => {
+                    syncMaskSize();
+                    overlay.classList.add("show");
+                };
+
+                if(activeImg.complete) { syncMaskSize(); overlay.classList.add("show"); }
+
+                const onResize = () => syncMaskSize();
+                window.addEventListener('resize', onResize);
+
+                activeImg.onclick = (e) => {
+                    e.stopPropagation();
+                    if (maskImg) {
+                        // 1回目から確実に "none" と比較されるため、正しく反転
+                        maskImg.style.display = (maskImg.style.display === "none") ? "block" : "none";
+                    }
+                };
+
+                overlay.onclick = () => {
+                    window.removeEventListener('resize', onResize);
+                    overlay.classList.remove("show");
+                    setTimeout(() => overlay.remove(), 200);
+                };
+            };
+
             btnRight.onclick = () => Array.from(mid.list.selectedOptions).forEach(o => right.list.add(o));
             btnLeft.onclick = () => {
                 Array.from(right.list.selectedOptions).forEach(o => {
@@ -180,7 +266,7 @@ app.registerExtension({
             };
             btnUp.onclick = () => Array.from(mid.list.selectedOptions).forEach(o => { if (o.previousElementSibling) mid.list.insertBefore(o, o.previousElementSibling); });
             btnDown.onclick = () => Array.from(mid.list.selectedOptions).reverse().forEach(o => { if (o.nextElementSibling) mid.list.insertBefore(o, o.nextElementSibling.nextElementSibling); });
-            
+
             btnSave.onclick = async () => {
                 const tags = Array.from(mid.list.options).map(o => o.text).join(",");
                 await api.fetchApi("/gadget_nodes/train/save_tags", {
@@ -189,7 +275,6 @@ app.registerExtension({
                 });
             };
 
-            // 初期化とリロード対応
             setTimeout(() => updateAll(node, thumbCanvas, mid.list, right.list), 200);
             node.onConfigure = () => setTimeout(() => updateAll(node, thumbCanvas, mid.list, right.list), 300);
         };
