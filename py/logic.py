@@ -57,6 +57,42 @@ class DecrementNode:
         return (i - 1,)
 
 
+class IntEqualsNode:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "i": ("INT", {"forceInput": True}),
+                "equals": ("INT", {"default": 0})
+            }
+        }
+    RETURN_TYPES = ("BOOLEAN",)
+    RETURN_NAMES = ("equals",)
+    FUNCTION = "run"
+    OUTPUT_NODE = False
+    CATEGORY = CATEORY_LOGIC
+
+    def run(self, i:int, equals:int):
+        return (i == equals,)
+
+class IntNotEqualsNode:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "i": ("INT", {"forceInput": True}),
+                "not_equals": ("INT", {"default": 0})
+            }
+        }
+    RETURN_TYPES = ("BOOLEAN",)
+    RETURN_NAMES = ("not_equals",)
+    FUNCTION = "run"
+    OUTPUT_NODE = False
+    CATEGORY = CATEORY_LOGIC
+
+    def run(self, i:int, not_equals:int):
+        return (i != not_equals,)
+
 class SelectNthItemsOfAnyListNode:
     @classmethod
     def INPUT_TYPES(s):

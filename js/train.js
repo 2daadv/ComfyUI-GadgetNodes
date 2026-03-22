@@ -88,11 +88,11 @@ app.registerExtension({
             const tagsContainer = document.createElement("div"); 
             tagsContainer.style.height = "100px";
             
-            const btnAdd = document.createElement("button");
-            btnAdd.innerText = ">>";
-            btnAdd.style.cssText = "background: #335; color: #fff; border: none; padding: 6px; cursor: pointer; font-size: 11px;";
+            const btnKeep = document.createElement("button");
+            btnKeep.innerText = ">>";
+            btnKeep.style.cssText = "background: #335; color: #fff; border: none; padding: 6px; cursor: pointer; font-size: 11px;";
 
-            leftPane.append(thumbCanvas, tagsContainer, btnAdd);
+            leftPane.append(thumbCanvas, tagsContainer, btnKeep);
 
             // リスト作成
             const createBox = (title) => {
@@ -145,7 +145,7 @@ app.registerExtension({
             folderWidget.callback = () => updateAll(node, thumbCanvas, mid.list, right.list);
             imageWidget.callback = () => updateAll(node, thumbCanvas, mid.list, right.list);
 
-            btnAdd.onclick = () => {
+            btnKeep.onclick = () => {
                 if (!tagsWidget.value) return;
 
                 // 現在のKeepリストにあるタグをすべて取得してSetに格納（比較用）
