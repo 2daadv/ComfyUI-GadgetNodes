@@ -29,7 +29,8 @@ NODE_CLASS_MAPPINGS = {
     "Select Input Folder": InputFolderSelectNode,
     "Edit Train Tags": TrainTagsEditNode,
     "Crop Images (Manual)": ManualCropImagesNode,
-    "Load Images From Folder": LoadImagesFromFolderNode
+    "Load Images From Folder": LoadImagesFromFolderNode,    
+    "Select Image Indices": ImageIndicesSelectorNode
 }
 
 WEB_DIRECTORY = "./js"

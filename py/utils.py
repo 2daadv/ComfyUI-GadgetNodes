@@ -6,6 +6,7 @@ from pathlib import Path
 from logging import getLogger
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+GADGET_SESSIONS = {}
 
 logger = getLogger("ComfyUI.GadgetNodes")
 

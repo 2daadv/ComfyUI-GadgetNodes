@@ -3,9 +3,9 @@ import { api } from "/scripts/api.js";
 
 const GLOBAL_CROP_STATES = {};
 
-if (!document.getElementById("gadget-crop-style")) {
+if (!document.getElementById("gadget-image-style")) {
     const style = document.createElement('style');
-    style.id = "gadget-crop-style";
+    style.id = "gadget-image-style";
     style.textContent = `
         .crop-modal-overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
@@ -53,7 +53,41 @@ if (!document.getElementById("gadget-crop-style")) {
         .crop-btn { margin-left: 10px; padding: 8px 20px; cursor: pointer; border: 1px solid #555; background: #333; color: white; }
         .crop-btn-primary { background: #2a2; border-color: #3b3; }
         .crop-btn-secondary { background: #444; border-color: #666; }
-    `;
+
+        /* Image Indices Selector */
+        .sel-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 10005; display: flex; justify-content: center; align-items: center; font-family: sans-serif; }
+        .sel-dialog { width: 95vw; height: 92vh; background: #1c1c1c; border: 1px solid #444; display: flex; flex-direction: column; color: white; border-radius: 8px; overflow: hidden; }
+        .sel-header { padding: 12px 20px; background: #2a2a2a; border-bottom: 1px solid #444; font-weight: bold; display: flex; justify-content: space-between; align-items: center; }
+        .sel-content { 
+            flex: 1; overflow-y: auto; padding: 20px; display: grid; 
+            grid-template-columns: repeat(var(--column-count, 4), 1fr); 
+            gap: 10px; align-content: start; 
+        }
+        .sel-item { 
+            background: #000; border: 3px solid transparent; cursor: pointer; 
+            position: relative; width: 100%; aspect-ratio: 1 / 1; 
+            display: flex; align-items: center; justify-content: center; overflow: hidden;
+        }
+        .sel-item.selected { 
+            border-color: #00aaff; 
+            box-shadow: inset 0 0 0 2px #00aaff, 0 0 15px rgba(0, 170, 255, 0.5); 
+        }
+        .sel-item img { 
+            max-width: 100%; max-height: 100%; display: block; object-fit: contain; 
+            pointer-events: none; user-select: none;
+        }
+        .sel-item::after { 
+            content: attr(data-index); position: absolute; top: 5px; left: 5px; 
+            background: rgba(0,0,0,0.7); padding: 2px 6px; font-size: 10px; border-radius: 4px; z-index: 5;
+        }
+        .sel-footer { padding: 15px 25px; background: #2a2a2a; border-top: 1px solid #444; display: flex; align-items: center; gap: 20px; }
+        .sel-footer-btns { display: flex; gap: 8px; }
+        .sel-slider-container { flex: 1; display: flex; align-items: center; gap: 10px; justify-content: center; }
+        .sel-btn { padding: 8px 16px; cursor: pointer; background: #444; border: 1px solid #555; color: white; border-radius: 4px; font-size: 13px; min-width: 80px; }
+        .sel-btn-primary { background: #007bff; border-color: #008cff; }
+        .sel-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .sel-popup { position: absolute; z-index: 10010; background: #000; border: 2px solid #00aaff; cursor: move; max-width: 85vw; max-height: 85vh; box-shadow: 0 0 30px #000; }
+        .sel-popup img { display: block; max-width: 100%; max-height: 85vh; pointer-events: none; }`;
     document.head.appendChild(style);
 }
 
@@ -357,3 +391,159 @@ class CropDialog {
         this.overlay.remove(); if (this.popup) this.popup.remove();
     }
 }
+//---------------------------
+let GLOBAL_SELECTION_CACHE = { hash: "", indices: new Set() };
+app.registerExtension({
+    name: "Gadget.ImageIndicesSelector",
+    init() {
+        api.addEventListener("gadget.show_selector", (e) => {
+            const { node_id, images, input_hash } = e.detail;
+            this.showSelector(node_id, images, input_hash);
+        });
+    },
+
+    showSelector(node_id, images, input_hash) {
+        const overlay = document.createElement("div");
+        overlay.className = "sel-overlay";
+        const dialog = document.createElement("div");
+        dialog.className = "sel-dialog";
+        dialog.innerHTML = `<div class="sel-header"><span>Select Image Indices</span><span id="sel-count-badge">0 selected</span></div>`;
+        
+        const content = document.createElement("div");
+        content.className = "sel-content";
+        content.style.setProperty("--column-count", 4);
+
+        let selected = new Set();
+        if (GLOBAL_SELECTION_CACHE.hash === input_hash) {
+            selected = new Set(GLOBAL_SELECTION_CACHE.indices);
+        }
+        
+        let lastClicked = 0;
+        let popup = null;
+
+        const render = () => {
+            content.querySelectorAll(".sel-item").forEach((item, i) => {
+                item.classList.toggle("selected", selected.has(i));
+            });
+            const countBadge = dialog.querySelector("#sel-count-badge");
+            countBadge.innerText = `${selected.size} selected`;
+            okBtn.disabled = selected.size === 0;
+        };
+
+        const createItem = (data, idx) => {
+            const item = document.createElement("div");
+            item.className = "sel-item";
+            item.dataset.index = idx;
+            const img = document.createElement("img");
+            img.src = data.src;
+            item.appendChild(img);
+
+            item.onclick = (e) => {
+                if (e.ctrlKey || e.metaKey) {
+                    selected.has(idx) ? selected.delete(idx) : selected.add(idx);
+                } else if (e.shiftKey) {
+                    const start = Math.min(lastClicked, idx);
+                    const end = Math.max(lastClicked, idx);
+                    for (let i = start; i <= end; i++) selected.add(i);
+                } else {
+                    selected.clear();
+                    selected.add(idx);
+                }
+                lastClicked = idx;
+                render();
+            };
+            item.ondblclick = () => showPopup(data.src);
+            return item;
+        };
+
+        const showPopup = (src) => {
+            if (popup) { popup.querySelector("img").src = src; return; }
+            popup = document.createElement("div");
+            popup.className = "sel-popup";
+            popup.style.left = "50px"; popup.style.top = "50px";
+            popup.innerHTML = `<img src="${src}">`;
+            let isDragging = false, offset = [0, 0], moved = false;
+            popup.onmousedown = (e) => { isDragging = true; moved = false; offset = [popup.offsetLeft - e.clientX, popup.offsetTop - e.clientY]; };
+            const onMouseMove = (e) => { if (!isDragging) return; moved = true; popup.style.left = (e.clientX + offset[0]) + "px"; popup.style.top = (e.clientY + offset[1]) + "px"; };
+            const onMouseUp = () => isDragging = false;
+            window.addEventListener("mousemove", onMouseMove);
+            window.addEventListener("mouseup", onMouseUp);
+            popup.onclick = () => { if (!moved) { window.removeEventListener("mousemove", onMouseMove); window.removeEventListener("mouseup", onMouseUp); popup.remove(); popup = null; } };
+            document.body.appendChild(popup);
+        };
+
+        images.forEach((img, i) => content.appendChild(createItem(img, i)));
+        dialog.appendChild(content);
+
+        // フッター
+        const footer = document.createElement("div");
+        footer.className = "sel-footer";
+        
+        const leftBtns = document.createElement("div");
+        leftBtns.className = "sel-footer-btns";
+        const btnAll = document.createElement("button"); btnAll.className="sel-btn"; btnAll.innerText="全選択";
+        btnAll.onclick = () => { images.forEach((_,i)=>selected.add(i)); render(); };
+        const btnNone = document.createElement("button"); btnNone.className="sel-btn"; btnNone.innerText="全解除";
+        btnNone.onclick = () => { selected.clear(); render(); };
+        const btnInv = document.createElement("button"); btnInv.className="sel-btn"; btnInv.innerText="選択反転";
+        btnInv.onclick = () => {
+            const next = new Set();
+            images.forEach((_,i) => { if(!selected.has(i)) next.add(i); });
+            selected = next; render();
+        };
+        leftBtns.append(btnAll, btnNone, btnInv);
+
+        const sliderCont = document.createElement("div");
+        sliderCont.className = "sel-slider-container";
+        const slider = document.createElement("input");
+        slider.type = "range"; slider.min = "1"; slider.max = "10"; slider.value = "4";
+        const colLab = document.createElement("span"); colLab.innerText = "4 Columns";
+        slider.oninput = () => {
+            content.style.setProperty("--column-count", slider.value);
+            colLab.innerText = slider.value + (slider.value=="1"?" Column":" Columns");
+        };
+        sliderCont.append(document.createTextNode("Grid:"), slider, colLab);
+
+        const rightBtns = document.createElement("div");
+        rightBtns.className = "sel-footer-btns";
+        const okBtn = document.createElement("button"); okBtn.className="sel-btn sel-btn-primary"; okBtn.innerText="OK";
+        const clBtn = document.createElement("button"); clBtn.className="sel-btn"; clBtn.innerText="Cancel";
+
+        const close = async (cancelled) => {
+            if (popup) popup.remove();
+            overlay.remove();
+            window.removeEventListener("keydown", onKeyDown);
+            GLOBAL_SELECTION_CACHE = { hash: input_hash, indices: selected };
+            
+            await api.fetchApi("/gadget_nodes/image/select_callback", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    node_id: node_id,
+                    cancelled: cancelled,
+                    indices: Array.from(selected).sort((a,b)=>a-b).join(",")
+                })
+            });
+        };
+
+        okBtn.onclick = () => close(false);
+        clBtn.onclick = () => close(true);
+        rightBtns.append(okBtn, clBtn);
+
+        footer.append(leftBtns, sliderCont, rightBtns);
+        dialog.appendChild(footer);
+        overlay.appendChild(dialog);
+        document.body.appendChild(overlay);
+
+        const onKeyDown = (e) => {
+            if (e.key === "Escape") { if (popup) { popup.remove(); popup = null; } else close(true); }
+            if (e.key === "Enter" && !okBtn.disabled) close(false);
+            if (e.ctrlKey || e.metaKey) {
+                if (e.key === "a") { e.preventDefault(); btnAll.click(); }
+                if (e.key === "i") { e.preventDefault(); btnInv.click(); }
+            }
+        };
+        window.addEventListener("keydown", onKeyDown);
+        render();
+    }
+});
