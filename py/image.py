@@ -22,6 +22,7 @@ class ManualCropImagesNode:
                     "1:1",           # 正方形
                     "4:5", "5:4",    # SNS/ポートレート
                     "2:3", "3:2",    # カメラ標準
+                    "7:9", "9:7",    # SDXL素材
                     "9:16", "16:9",  # スマホ/YouTube
                     "9:21", "21:9",  # ウルトラワイド
                     "4:3", "3:4",    # 旧来モニタ
@@ -42,7 +43,6 @@ class ManualCropImagesNode:
         return float("NaN")
 
     def crop(self, images, aspect_ratio, unique_id):
-        # FIXME 入力がバッチのとき、最初の1枚目しか表示されない不具合がある
         images = unpack_images(images)
         aspect_ratio = unpack_list(aspect_ratio)
 
@@ -51,22 +51,23 @@ class ManualCropImagesNode:
             m.update(img.tobytes())
         image_hash = m.hexdigest()
 
+        total = len(images)
         preview_imgs = []
+        
+        # 1回目のプログレスバー：プレビュー生成
+        pbar = comfy.utils.ProgressBar(total)
         for img in images:
-            i = Image.fromarray((img * 255).astype('uint8'))
-            i.thumbnail((512, 512), Image.Resampling.HAMMING)
+            i = Image.fromarray(img) # unpack_imagesでuint8化済み
+            i.thumbnail((512, 512), Image.Resampling.BOX) # 高速なBOXに変更
             buffer = BytesIO()
             i.save(buffer, format="WebP", quality=75)
             preview_imgs.append(f"data:image/webp;base64,{base64.b64encode(buffer.getvalue()).decode('utf-8')}")
+            pbar.update(1)
 
-        # JS側へ送信して同期待機
-        # 待機状態の初期化
-        session = {
-            "results": None,
-            "event_obj": threading.Event()
-        }
+        session = {"results": None, "event_obj": threading.Event()}
         node_id = f"crop_{unique_id}"
         GADGET_SESSIONS[node_id] = session
+        
         try:
             PromptServer.instance.send_sync("gadget.show_crop_dialog", {
                 "node_id": node_id,
@@ -84,29 +85,27 @@ class ManualCropImagesNode:
                 return ([ExecutionBlocker(None)],)
 
             output_list = []
-            total = len(images)
-            pbar = comfy.utils.ProgressBar(total)
+            # 2回目のプログレスバー：切り抜き処理
+            pbar.update_absolute(0, total) 
             for i in range(total):
                 if comfy.model_management.processing_interrupted():
                     return ([ExecutionBlocker(None)],)
+                
                 c = reply[i]
-                rx = c['x']
-                ry = c['y']
-                rw = c['w']
-                rh = c['h']
                 img = images[i]
-                if rx < 0.001 and 0.999 < rw and ry < 0.001 and 0.999 < rh:
-                    output_list.append(torch.from_numpy(img).unsqueeze(0))
-                else:
-                    h, w, _ = img.shape
-                    x = max(0, min(int(rx * w), w - 1))
-                    y = max(0, min(int(ry * h), h - 1))
-                    cw = max(1, min(int(rw * w), w - x))
-                    ch = max(1, min(int(rh * h), h - y))
-                    cropped_np = img[y:y+ch, x:x+cw, :]
-                    cropped_tensor = torch.from_numpy(cropped_np)
-                    output_list.append(cropped_tensor.unsqueeze(0))
-                pbar.update_absolute(i + 1, total)
+                h, w, _ = img.shape
+                
+                # クロップ座標計算
+                x = max(0, min(int(c['x'] * w), w - 1))
+                y = max(0, min(int(c['y'] * h), h - 1))
+                cw = max(1, min(int(c['w'] * w), w - x))
+                ch = max(1, min(int(c['h'] * h), h - y))
+                
+                cropped_np = img[y:y+ch, x:x+cw, :]
+                # ComfyUI形式 [1, H, W, C] (0-1 float32) に戻す
+                cropped_tensor = torch.from_numpy(cropped_np.astype(np.float32) / 255.0).unsqueeze(0)
+                output_list.append(cropped_tensor)
+                pbar.update(1)
 
             return (output_list,)
         finally:
@@ -215,43 +214,24 @@ class ImageIndicesSelectorNode:
         return float("NaN")
 
     def run(self, images, unique_id):
-        processed_images = []
-        for img in images:
-            if img.ndim == 4:
-                for i in range(img.shape[0]):
-                    processed_images.append(img[i])
-            else:
-                processed_images.append(img)
-        
+        processed_images = unpack_images(images)
         total = len(processed_images)
         image_data_list = []
         hasher = hashlib.md5()
-        
-        # プログレスバーの初期化
         pbar = comfy.utils.ProgressBar(total)
         
-        for img_tensor in processed_images:
+        for img_np in processed_images:
             if comfy.model_management.processing_interrupted():
                 return (ExecutionBlocker(None),)
 
-            # テンソルをPILへ
-            i = 255. * img_tensor.cpu().numpy()
-            img_np = np.clip(i, 0, 255).astype(np.uint8)
             img_pil = Image.fromarray(img_np)
+            img_pil.thumbnail((512, 512), Image.Resampling.BOX) # 高速なBOXに変更
             
-            # 【高速化】512pxの正方形に収まるようリサイズ
-            img_pil.thumbnail((512, 512), Image.Resampling.HAMMING)
-            
-            # WebPエンコード
             buffered = BytesIO()
             img_pil.save(buffered, format="WebP", quality=75)
             img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
-            img_src = f"data:image/webp;base64,{img_b64}"
-            
-            image_data_list.append({"src": img_src})
+            image_data_list.append({"src": f"data:image/webp;base64,{img_b64}"})
             hasher.update(img_b64[:100].encode())
-            
-            # プログレスバー更新
             pbar.update(1)
         
         # JS側へ送信して同期待機

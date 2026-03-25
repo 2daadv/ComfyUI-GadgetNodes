@@ -55,20 +55,45 @@ def process_thumbnail(img_path, max_size=(300, 300)):
         return None
 
 def unpack_images(images):
-    # List入力を受け付けるノードで、IMAGESを引数に取る場合にComfyUIの仕様で次元が増えていることがあるので、不要な次元を削る。
+    """
+    1枚、リスト、バッチのあらゆる入力を、(H, W, 3) の numpy 配列のリストに安全に展開する
+    """
     unpacked_images = []
     for img in images:
-        # CPUのnumpy配列に変換（処理しやすくするため）
-        img_np = img.cpu().numpy()
-        # (1, 1, H, W, 3) などの余計な次元をすべて剥ぎ取る
-        while img_np.ndim > 3:
-            img_np = img_np[0]
-        # もし (H, W, 3) に満たない（モノクロなど）場合はエラーを防ぐため再構築
-        if img_np.ndim == 2:
-            img_np = np.stack([img_np] * 3, axis=-1)
-        unpacked_images.append(img_np)
+        # サイズ1の余計な次元(1, 1, H, W, 3)などを除去
+        img = img.squeeze()
+        
+        if img.ndim == 4: # バッチの場合
+            for i in range(img.shape[0]):
+                img_np = img[i].cpu().numpy()
+                unpacked_images.append(ensure_rgb(img_np))
+        elif img.ndim == 3: # 単一画像
+            unpacked_images.append(ensure_rgb(img.cpu().numpy()))
+        elif img.ndim == 2: # モノクロ
+            unpacked_images.append(ensure_rgb(img.cpu().numpy()))
     return unpacked_images
 
+def ensure_rgb(img_np):
+    """モノクロをRGBに変換し、(H, W, 3)を保証する。また[0,1]を[0,255]のuint8にする"""
+    if img_np.ndim == 2:
+        img_np = np.stack([img_np] * 3, axis=-1)
+    
+    # 浮動小数点(0-1)の場合は255倍して変換、既にuint8ならそのまま
+    if img_np.dtype != np.uint8:
+        img_np = np.clip(img_np * 255.0, 0, 255).astype(np.uint8)
+    return img_np
+
 def unpack_list(any_list):
-    # List入力を受け付けるノードでComfyUIの仕様で次元が増えていることがあるので、不要な次元を削る
-    return any_list[0] if isinstance(any_list, list) else any_list
+    # 1. リストではない（既に展開済み）ならそのまま返す
+    if not isinstance(any_list, list):
+        return any_list
+    
+    # 2. リストのリストになっており、かつ外側が長さ1なら、中身を取り出す
+    # これにより [ ["1:1", "4:5"] ] -> ["1:1", "4:5"] となり、リスト構造が維持される
+    if len(any_list) == 1 and isinstance(any_list[0], list):
+        return any_list[0]
+        
+    # 3. 単なるリスト [ "1:1" ] などの場合は、最初の要素を返す（現在の実装の意図）
+    # ただし、これが「画像処理のパラメータ」なら [0] で良いですが、
+    # 「複数の画像を処理する」ノードなら、リストのまま扱うべき局面もあります。
+    return any_list[0] if len(any_list) > 0 else any_list
