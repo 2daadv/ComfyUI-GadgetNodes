@@ -67,7 +67,6 @@ if (!document.getElementById("gadget-image-style")) {
         /* Image Indices Selector */
         .sel-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 10005; display: flex; justify-content: center; align-items: center; font-family: sans-serif; }
         .sel-dialog { width: 95vw; height: 92vh; background: #1c1c1c; border: 1px solid #444; display: flex; flex-direction: column; color: white; border-radius: 8px; overflow: hidden; }
-        .sel-header { padding: 12px 20px; background: #2a2a2a; border-bottom: 1px solid #444; font-weight: bold; display: flex; justify-content: space-between; align-items: center; }
         .sel-content { 
             flex: 1; overflow-y: auto; padding: 20px; display: grid;
             grid-template-columns: repeat(auto-fill, 128px);
@@ -79,20 +78,15 @@ if (!document.getElementById("gadget-image-style")) {
             display: flex; align-items: center; justify-content: center; overflow: hidden;
             border-radius: 4px; box-sizing: border-box;
         }
-        .sel-item.selected {
-            border-color: #00aaff;
-            box-shadow: inset 0 0 0 1px #00aaff;
-        }
-        .sel-item img {
-            max-width: 100%; max-height: 100%; display: block; object-fit: contain;
-            pointer-events: none; user-select: none;
-        }
+        .sel-item.selected { border-color: #00aaff; box-shadow: inset 0 0 0 1px #00aaff; }
+        .sel-item img { max-width: 100%; max-height: 100%; display: block; object-fit: contain; pointer-events: none; user-select: none; }
         .sel-item::after {
             content: attr(data-index); position: absolute; top: 4px; left: 4px;
             background: rgba(0,0,0,0.7); padding: 1px 5px; font-size: 10px; border-radius: 3px; z-index: 5;
         }
         .sel-footer { height: 60px; min-height: 60px; padding: 0 25px; background: #2a2a2a; border-top: 1px solid #444; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
-        .sel-footer-btns { display: flex; gap: 10px; }
+        .sel-footer-btns { display: flex; align-items: center; gap: 10px; }
+        .sel-count-badge { font-size: 13px; color: #aaa; margin-right: 8px; }
         .sel-btn { padding: 0 16px; height: 32px; cursor: pointer; background: #444; border: 1px solid #555; color: white; border-radius: 4px; font-size: 13px; display: inline-flex; align-items: center; justify-content: center; }
         .sel-btn-primary { background: #007bff; border-color: #008cff; }
         .sel-btn:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -405,7 +399,6 @@ app.registerExtension({
         overlay.className = "sel-overlay";
         const dialog = document.createElement("div");
         dialog.className = "sel-dialog";
-        dialog.innerHTML = `<div class="sel-header"><span>Select Image Indices</span><span id="sel-count-badge">0 selected</span></div>`;
         
         const content = document.createElement("div");
         content.className = "sel-content";
@@ -418,12 +411,14 @@ app.registerExtension({
         let lastClicked = 0;
         let popup = null;
 
+        const countBadge = document.createElement("span");
+        countBadge.className = "sel-count-badge";
+
         const render = () => {
             content.querySelectorAll(".sel-item").forEach((item, i) => {
                 item.classList.toggle("selected", selected.has(i));
             });
-            const countBadge = dialog.querySelector("#sel-count-badge");
-            countBadge.innerText = `${selected.size} selected`;
+            countBadge.innerText = `${selected.size}/${images.length} Selected`;
             okBtn.disabled = selected.size === 0;
         };
 
@@ -513,7 +508,7 @@ app.registerExtension({
 
         okBtn.onclick = () => close(false);
         clBtn.onclick = () => close(true);
-        rightBtns.append(okBtn, clBtn);
+        rightBtns.append(countBadge, okBtn, clBtn);
 
         footer.append(leftBtns, rightBtns);
         dialog.appendChild(footer);
