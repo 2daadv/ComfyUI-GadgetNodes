@@ -90,8 +90,25 @@ if (!document.getElementById("gadget-image-style")) {
         .sel-btn { padding: 0 16px; height: 32px; cursor: pointer; background: #444; border: 1px solid #555; color: white; border-radius: 4px; font-size: 13px; display: inline-flex; align-items: center; justify-content: center; }
         .sel-btn-primary { background: #007bff; border-color: #008cff; }
         .sel-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-        .sel-popup { position: absolute; z-index: 10010; background: #000; border: 2px solid #00aaff; cursor: move; max-width: 85vw; max-height: 85vh; box-shadow: 0 0 30px #000; }
-        .sel-popup img { display: block; max-width: 100%; max-height: 85vh; pointer-events: none; }
+        .sel-popup {
+            position: fixed;
+            z-index: 10010;
+            background: #000;
+            border: 2px solid #00aaff;
+            max-width: 60vw;
+            max-height: 60vh;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+            border-radius: 4px;
+            overflow: hidden;
+            pointer-events: none;
+            display: none;
+        }
+        .sel-popup img {
+            display: block;
+            width: auto; height: auto;
+            max-width: 60vw; max-height: 60vh;
+            object-fit: contain;
+        }
     `;
     document.head.appendChild(style);
 }
@@ -395,6 +412,7 @@ app.registerExtension({
     },
 
     showSelector(node_id, images, input_hash) {
+        const totalImages = images.length;
         const overlay = document.createElement("div");
         overlay.className = "sel-overlay";
         const dialog = document.createElement("div");
@@ -409,7 +427,13 @@ app.registerExtension({
         }
         
         let lastClicked = 0;
-        let popup = null;
+
+        // ホバープレビュー用の共有ポップアップ要素
+        const hoverPopup = document.createElement("div");
+        hoverPopup.className = "sel-popup";
+        const popupImg = document.createElement("img");
+        hoverPopup.appendChild(popupImg);
+        document.body.appendChild(hoverPopup);
 
         const countBadge = document.createElement("span");
         countBadge.className = "sel-count-badge";
@@ -418,8 +442,37 @@ app.registerExtension({
             content.querySelectorAll(".sel-item").forEach((item, i) => {
                 item.classList.toggle("selected", selected.has(i));
             });
-            countBadge.innerText = `${selected.size}/${images.length} Selected`;
+            countBadge.innerText = `${selected.size}/${totalImages} Selected`;
             okBtn.disabled = selected.size === 0;
+        };
+
+        // ポップアップ位置計算ロジック
+        const updatePopupPosition = (e) => {
+            const offsetX = 20;
+            const offsetY = 20;
+            const popupWidth = hoverPopup.offsetWidth;
+            const popupHeight = hoverPopup.offsetHeight;
+            const viewWidth = window.innerWidth;
+            const viewHeight = window.innerHeight;
+
+            let x = e.clientX + offsetX;
+            let y = e.clientY + offsetY;
+
+            // 画面右端での反転
+            if (x + popupWidth > viewWidth) {
+                x = e.clientX - popupWidth - offsetX;
+            }
+            // 画面下端での反転
+            if (y + popupHeight > viewHeight) {
+                y = e.clientY - popupHeight - offsetY;
+            }
+
+            // 最終補正
+            x = Math.max(5, Math.min(x, viewWidth - popupWidth - 5));
+            y = Math.max(5, Math.min(y, viewHeight - popupHeight - 5));
+
+            hoverPopup.style.left = x + "px";
+            hoverPopup.style.top = y + "px";
         };
 
         const createItem = (data, idx) => {
@@ -429,6 +482,20 @@ app.registerExtension({
             const img = document.createElement("img");
             img.src = data.src;
             item.appendChild(img);
+
+            // ホバーイベント
+            item.onmouseenter = (e) => {
+                popupImg.src = data.src;
+                hoverPopup.style.display = "block";
+                updatePopupPosition(e);
+            };
+            item.onmousemove = (e) => {
+                updatePopupPosition(e);
+            };
+            item.onmouseleave = () => {
+                hoverPopup.style.display = "none";
+                popupImg.src = "";
+            };
 
             item.onclick = (e) => {
                 if (e.ctrlKey || e.metaKey) {
@@ -444,24 +511,7 @@ app.registerExtension({
                 lastClicked = idx;
                 render();
             };
-            item.ondblclick = () => showPopup(data.src);
             return item;
-        };
-
-        const showPopup = (src) => {
-            if (popup) { popup.querySelector("img").src = src; return; }
-            popup = document.createElement("div");
-            popup.className = "sel-popup";
-            popup.style.left = "50px"; popup.style.top = "50px";
-            popup.innerHTML = `<img src="${src}">`;
-            let isDragging = false, offset = [0, 0], moved = false;
-            popup.onmousedown = (e) => { isDragging = true; moved = false; offset = [popup.offsetLeft - e.clientX, popup.offsetTop - e.clientY]; };
-            const onMouseMove = (e) => { if (!isDragging) return; moved = true; popup.style.left = (e.clientX + offset[0]) + "px"; popup.style.top = (e.clientY + offset[1]) + "px"; };
-            const onMouseUp = () => isDragging = false;
-            window.addEventListener("mousemove", onMouseMove);
-            window.addEventListener("mouseup", onMouseUp);
-            popup.onclick = () => { if (!moved) { window.removeEventListener("mousemove", onMouseMove); window.removeEventListener("mouseup", onMouseUp); popup.remove(); popup = null; } };
-            document.body.appendChild(popup);
         };
 
         images.forEach((img, i) => content.appendChild(createItem(img, i)));
@@ -490,7 +540,7 @@ app.registerExtension({
         const clBtn = document.createElement("button"); clBtn.className="sel-btn"; clBtn.innerText="Cancel";
 
         const close = async (cancelled) => {
-            if (popup) popup.remove();
+            if (hoverPopup) hoverPopup.remove();
             overlay.remove();
             window.removeEventListener("keydown", onKeyDown);
             GLOBAL_SELECTION_CACHE = { hash: input_hash, indices: selected };
@@ -516,7 +566,13 @@ app.registerExtension({
         document.body.appendChild(overlay);
 
         const onKeyDown = (e) => {
-            if (e.key === "Escape") { if (popup) { popup.remove(); popup = null; } else close(true); }
+            if (e.key === "Escape") {
+                if (hoverPopup && hoverPopup.style.display === "block") {
+                    hoverPopup.style.display = "none";
+                } else {
+                    close(true);
+                }
+            }
             if (e.key === "Enter" && !okBtn.disabled) close(false);
             if (e.ctrlKey || e.metaKey) {
                 if (e.key === "a") { e.preventDefault(); btnAll.click(); }
