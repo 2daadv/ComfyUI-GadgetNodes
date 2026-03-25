@@ -11,14 +11,7 @@ from comfy_execution.graph import ExecutionBlocker
 from .utils import *
 
 CATEGORY_IMAGE = "Gadget/image"
-
-class ManualCropImagesNode:
-    @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "images": ("IMAGE",), 
-                "aspect_ratio": ([
+ASPECT_RATIO_OPTIONS = [
                     "1:1",           # 正方形
                     "4:5", "5:4",    # SNS/ポートレート
                     "2:3", "3:2",    # カメラ標準
@@ -27,7 +20,15 @@ class ManualCropImagesNode:
                     "9:21", "21:9",  # ウルトラワイド
                     "4:3", "3:4",    # 旧来モニタ
                     "Any"            # 自由
-                ], {"default": "1:1"}),
+                ]
+
+class ManualCropImagesNode:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "images": ("IMAGE",), 
+                "aspect_ratio": (ASPECT_RATIO_OPTIONS, {"default": "1:1"}),
             },
             "hidden": {"unique_id": "UNIQUE_ID"}
         }
@@ -53,7 +54,7 @@ class ManualCropImagesNode:
 
         total = len(images)
         preview_imgs = []
-        
+
         # 1回目のプログレスバー：プレビュー生成
         pbar = comfy.utils.ProgressBar(total)
         for img in images:
@@ -67,12 +68,13 @@ class ManualCropImagesNode:
         session = {"results": None, "event_obj": threading.Event()}
         node_id = f"crop_{unique_id}"
         GADGET_SESSIONS[node_id] = session
-        
+
         try:
             PromptServer.instance.send_sync("gadget.show_crop_dialog", {
                 "node_id": node_id,
                 "preview_images": preview_imgs,
-                "aspect_ratio": aspect_ratio,
+                "default_aspect_ratio": aspect_ratio,
+                "aspect_ratio_options": ASPECT_RATIO_OPTIONS,
                 "image_hash": image_hash
             })
             while not session["event_obj"].wait(timeout=1.0):
@@ -90,17 +92,17 @@ class ManualCropImagesNode:
             for i in range(total):
                 if comfy.model_management.processing_interrupted():
                     return ([ExecutionBlocker(None)],)
-                
+
                 c = reply[i]
                 img = images[i]
                 h, w, _ = img.shape
-                
+
                 # クロップ座標計算
                 x = max(0, min(int(c['x'] * w), w - 1))
                 y = max(0, min(int(c['y'] * h), h - 1))
                 cw = max(1, min(int(c['w'] * w), w - x))
                 ch = max(1, min(int(c['h'] * h), h - y))
-                
+
                 cropped_np = img[y:y+ch, x:x+cw, :]
                 # ComfyUI形式 [1, H, W, C] (0-1 float32) に戻す
                 cropped_tensor = torch.from_numpy(cropped_np.astype(np.float32) / 255.0).unsqueeze(0)
@@ -219,21 +221,21 @@ class ImageIndicesSelectorNode:
         image_data_list = []
         hasher = hashlib.md5()
         pbar = comfy.utils.ProgressBar(total)
-        
+
         for img_np in processed_images:
             if comfy.model_management.processing_interrupted():
                 return (ExecutionBlocker(None),)
 
             img_pil = Image.fromarray(img_np)
             img_pil.thumbnail((512, 512), Image.Resampling.BOX) # 高速なBOXに変更
-            
+
             buffered = BytesIO()
             img_pil.save(buffered, format="WebP", quality=75)
             img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
             image_data_list.append({"src": f"data:image/webp;base64,{img_b64}"})
             hasher.update(img_b64[:100].encode())
             pbar.update(1)
-        
+
         # JS側へ送信して同期待機
         # 待機状態の初期化
         session = {
@@ -257,7 +259,7 @@ class ImageIndicesSelectorNode:
             # キャンセル時または中断時
             if res is None or res.get("cancelled"):
                 return (ExecutionBlocker(None),)
-            
+
             return (res.get("indices", ""),)
         finally:
             if node_id in GADGET_SESSIONS:
@@ -267,11 +269,11 @@ class ImageIndicesSelectorNode:
 async def select_callback(request):
     json_data = await request.json()
     node_id = json_data.get("node_id")
-    
+
     if node_id in GADGET_SESSIONS:
         session = GADGET_SESSIONS[node_id]
         session["result"] = json_data
         session["event_obj"].set() # このnode_idを待っているスレッドだけを再開
         return web.json_response({"status": "ok"})
-    
+
     return web.json_response({"status": "error", "message": "Invalid or expired node_id"}, status=400)

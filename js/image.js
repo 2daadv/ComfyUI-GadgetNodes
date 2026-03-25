@@ -50,7 +50,23 @@ if (!document.getElementById("gadget-image-style")) {
             gap: 10px; /* ボタン間の隙間 */
             margin-left: auto; /* 左側に要素がない場合も右寄せにする */
         }
-        .crop-btn { margin-left: 10px; padding: 8px 20px; cursor: pointer; border: 1px solid #555; background: #333; color: white; }
+       .crop-btn {
+            background: #333;
+            color: #fff;
+            border: 1px solid #555;
+            padding: 0 12px;           /* 左右のパディング */
+            height: 28px;              /* 高さを明示的に指定 */
+            line-height: 26px;         /* テキストを垂直中央に */
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            box-sizing: border-box;    /* ボーダーを含めた高さ計算にする */
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .crop-btn:hover { background: #444; }
+        select.crop-btn { padding-right: 20px; }
         .crop-btn-primary { background: #2a2; border-color: #3b3; }
         .crop-btn-secondary { background: #444; border-color: #666; }
 
@@ -105,22 +121,27 @@ app.registerExtension({
 class CropDialog {
     constructor(data) {
         this.node_id = data.node_id;
-        this.aspect_ratio = data.aspect_ratio;
         this.images = data.preview_images;
         this.image_hash = data.image_hash;
+        this.aspect_ratio_options = data.aspect_ratio_options;
 
         const prev = GLOBAL_CROP_STATES[this.node_id];
-        if (prev && prev.hash === this.image_hash && prev.ratio === this.aspect_ratio) {
+        if (prev && prev.hash === this.image_hash) {
             this.results = JSON.parse(JSON.stringify(prev.results));
         } else {
-            this.results = this.images.map(() => ({ x: 0.1, y: 0.1, w: 0.8, h: 0.8 }));
+            this.results = this.images.map(() => ({
+                x: 0.1, y: 0.1, w: 0.8, h: 0.8,
+                ratio: data.default_aspect_ratio
+            }));
         }
         this.initUI();
     }
 
-    calculateInitialCrop(imgW, imgH) {
-        if (this.aspect_ratio === "Any") return { x: 0.1, y: 0.1, w: 0.8, h: 0.8 };
-        const [rw, rh] = this.aspect_ratio.split(':').map(Number);
+    calculateInitialCrop(imgW, imgH, aspect_ratio, current = null) {
+        if (aspect_ratio === "Any") {
+            return current ? { x: current.x, y: current.y, w: current.w, h: current.h } : { x: 0.1, y: 0.1, w: 0.8, h: 0.8 };
+        }
+        const [rw, rh] = aspect_ratio.split(':').map(Number);
         const targetR = rw / rh;
         const imgR = imgW / imgH;
 
@@ -148,6 +169,7 @@ class CropDialog {
             const div = document.createElement('div');
             div.className = 'crop-thumb-container';
             div.onclick = () => this.openEditor(i);
+
             const img = document.createElement('img');
             img.src = src; img.className = 'crop-thumb-img';
             const canv = document.createElement('canvas');
@@ -156,8 +178,9 @@ class CropDialog {
             content.appendChild(div);
 
             img.onload = () => {
-                if (!GLOBAL_CROP_STATES[this.node_id] || GLOBAL_CROP_STATES[this.node_id].ratio !== this.aspect_ratio) {
-                    this.results[i] = this.calculateInitialCrop(img.naturalWidth, img.naturalHeight);
+                if (!GLOBAL_CROP_STATES[this.node_id]) {
+                    const initial = this.calculateInitialCrop(img.naturalWidth, img.naturalHeight, this.results[i].ratio);
+                    Object.assign(this.results[i], initial);
                 }
                 this.drawThumbOverlay(canv, i);
             };
@@ -165,16 +188,13 @@ class CropDialog {
 
         const footer = document.createElement('div');
         footer.className = 'crop-footer';
-        // 右側に寄せるためのコンテナ
         const footRight = document.createElement('div');
         footRight.className = 'crop-footer-right';
         const ok = document.createElement('button');
-        ok.className="crop-btn crop-btn-primary";
-        ok.innerText = "OK";
+        ok.className="crop-btn crop-btn-primary"; ok.innerText = "OK";
         ok.onclick = () => this.finish(true);
         const cancel = document.createElement('button');
-        cancel.className="crop-btn";
-        cancel.innerText = "Cancel";
+        cancel.className="crop-btn"; cancel.innerText = "Cancel";
         cancel.onclick = () => this.finish(false);
         footRight.append(ok, cancel);
         footer.append(footRight);
@@ -216,50 +236,44 @@ class CropDialog {
         const foot = document.createElement('div');
         foot.className = 'crop-footer';
 
-        // --- 左側：操作系 ---
         const footLeft = document.createElement('div');
         footLeft.className = 'crop-footer-left';
 
-        // チェックボックス
-        const lockItem = document.createElement('div');
-        lockItem.className = 'crop-control-item';
-        this.aspectLock = document.createElement('input');
-        this.aspectLock.type = 'checkbox';
-        this.aspectLock.id = 'crop-aspect-lock';
-        const lockLabel = document.createElement('label');
-        lockLabel.htmlFor = 'crop-aspect-lock';
-        lockLabel.innerText = 'Keep Aspect Ratio';
-        lockItem.append(this.aspectLock, lockLabel);
-
-        // 全選択
         const selectAllBtn = document.createElement('button');
         selectAllBtn.className = 'crop-btn crop-btn-secondary';
         selectAllBtn.innerText = 'Select ALL';
         selectAllBtn.onclick = () => {
-            this.results[this.currentIndex] = { x: 0, y: 0, w: 1, h: 1 };
-            this.aspectLock.checked = false;
+            this.results[this.currentIndex].ratio = "Any";
+            Object.assign(this.results[this.currentIndex], { x: 0, y: 0, w: 1, h: 1 });
+            this.editorSelect.value = "Any";
             this.render();
         };
-        footLeft.append(lockItem, selectAllBtn);
+        this.editorSelect = document.createElement('select');
+        this.editorSelect.className = 'crop-btn';
+        this.aspect_ratio_options.forEach(opt => {
+            const o = document.createElement('option');
+            o.value = opt; o.text = opt;
+            this.editorSelect.appendChild(o);
+        });
+        this.editorSelect.onchange = (e) => {
+            const newRatio = e.target.value;
+            const newCrop = this.calculateInitialCrop(this.activeImg.width, this.activeImg.height, newRatio, this.results[this.currentIndex]);
+            this.results[this.currentIndex] = { ...newCrop, ratio: newRatio };
+            this.render();
+        };
+        footLeft.append(selectAllBtn, this.editorSelect);
 
-        // --- 右側：決定系 ---
         const footRight = document.createElement('div');
         footRight.className = 'crop-footer-right';
-
         const ok = document.createElement('button');
-        ok.className="crop-btn crop-btn-primary";
-        ok.innerText = "OK";
+        ok.className="crop-btn crop-btn-primary"; ok.innerText = "OK";
         ok.onclick = () => { this.popup.style.display = 'none'; this.refreshGrid(); };
-
         const cl = document.createElement('button');
-        cl.className="crop-btn"; 
-        cl.innerText = "Cancel";
-        cl.onclick = () => { 
+        cl.className="crop-btn"; cl.innerText = "Cancel";
+        cl.onclick = () => {
             this.results[this.currentIndex] = JSON.parse(this.backup);
             this.popup.style.display = 'none'; 
         };
-
-        // OKが左、Cancelが右
         footRight.append(ok, cl);
 
         foot.append(footLeft, footRight);
@@ -272,11 +286,7 @@ class CropDialog {
         this.currentIndex = i;
         this.backup = JSON.stringify(this.results[i]);
         this.popup.style.display = 'flex';
-
-        // チェックボックスの状態制御
-        const isAny = this.aspect_ratio === "Any";
-        this.aspectLock.disabled = isAny;
-        this.aspectLock.checked = !isAny;
+        this.editorSelect.value = this.results[i].ratio;
 
         this.activeImg = new Image();
         this.activeImg.src = this.images[i];
@@ -315,7 +325,7 @@ class CropDialog {
             const w = Math.abs(m.x - c.x) < b, o = Math.abs(m.x - (c.x + c.w)) < b;
 
             // チェックボックスの状態を判定に使用
-            const isFree = !this.aspectLock.checked;
+            const isFree = c.ratio === "Any";
 
             if (n && w) this.canvas.style.cursor = "nw-resize";
             else if (n && o) this.canvas.style.cursor = "ne-resize";
@@ -332,7 +342,7 @@ class CropDialog {
             const n = Math.abs(m.y - c.y) < b, s = Math.abs(m.y - (c.y+c.h)) < b;
             const w = Math.abs(m.x - c.x) < b, o = Math.abs(m.x - (c.x+c.w)) < b;
 
-            const isFree = !this.aspectLock.checked;
+            const isFree = c.ratio === "Any";
 
             if (n && w) handle = "nw"; else if (n && o) handle = "ne";
             else if (s && w) handle = "sw"; else if (s && o) handle = "se";
@@ -353,7 +363,7 @@ class CropDialog {
             if (handle === "move") {
                 c.x = Math.max(0, Math.min(1 - c.w, this.orig.x + dx));
                 c.y = Math.max(0, Math.min(1 - c.h, this.orig.y + dy));
-            } else if (!this.aspectLock.checked) {
+            } else if (c.ratio === "Any") {
                 // 自由リサイズ
                 if (handle.includes("n")) { c.y = Math.max(0, Math.min(this.anchorY-0.05, this.orig.y + dy)); c.h = this.anchorY - c.y; }
                 if (handle.includes("s")) { c.h = Math.max(0.05, Math.min(1 - this.anchorY, this.orig.h + dy)); }
@@ -361,7 +371,7 @@ class CropDialog {
                 if (handle.includes("e")) { c.w = Math.max(0.05, Math.min(1 - this.anchorX, this.orig.w + dx)); }
             } else {
                 // 固定比率リサイズ
-                const [rw, rh] = this.aspect_ratio.split(':').map(Number);
+                const [rw, rh] = c.ratio.split(':').map(Number);
                 const ratio = (rw / rh) * (this.activeImg.height / this.activeImg.width);
 
                 if (handle.includes("e")) c.w = Math.max(0.05, Math.min(1 - this.anchorX, this.orig.w + dx));
@@ -384,7 +394,7 @@ class CropDialog {
     }
 
     async finish(ok) {
-        if (ok) GLOBAL_CROP_STATES[this.node_id] = { hash: this.image_hash, results: this.results, ratio: this.aspect_ratio };
+        if (ok) GLOBAL_CROP_STATES[this.node_id] = { hash: this.image_hash, results: this.results };
         await api.fetchApi("/gadget_nodes/image/crop_callback", {
             method: "POST", body: JSON.stringify({ node_id: this.node_id, results: ok ? this.results : "CANCEL" })
         });
