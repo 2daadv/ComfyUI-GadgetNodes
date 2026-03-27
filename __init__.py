@@ -14,6 +14,8 @@ NODE_CLASS_MAPPINGS = {
     "-1": DecrementNode,
     "Int Equals": IntEqualsNode,
     "Int Not Equals": IntNotEqualsNode,
+    "Int Nearly Equals": IntNearlyEqualsNode,
+    "Float Nearly Equals": FloatNearlyEqualsNode,
     "0": Int0Node,
     "1": Int1Node,
     "-1": Int_1Node,
@@ -29,8 +31,9 @@ NODE_CLASS_MAPPINGS = {
     "Select Input Folder": InputFolderSelectNode,
     "Edit Train Tags": TrainTagsEditNode,
     "Crop Images (Manual)": ManualCropImagesNode,
-    "Load Images From Folder": LoadImagesFromFolderNode,    
-    "Select Image Indices": ImageIndicesSelectorNode
+    "Load Images From Folder": LoadImagesFromFolderNode,
+    "Select Image Indices": ImageIndicesSelectorNode,
+    "Smart Resize Image": SmartResizeImageNode
 }
 
 WEB_DIRECTORY = "./js"

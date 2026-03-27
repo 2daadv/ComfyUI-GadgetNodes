@@ -55,32 +55,37 @@ def process_thumbnail(img_path, max_size=(300, 300)):
         return None
 
 def unpack_images(images):
-    """
-    1枚、リスト、バッチのあらゆる入力を、(H, W, 3) の numpy 配列のリストに安全に展開する
-    """
     unpacked_images = []
     for img in images:
-        # サイズ1の余計な次元(1, 1, H, W, 3)などを除去
-        img = img.squeeze()
-        
-        if img.ndim == 4: # バッチの場合
+        # 4次元テンソル [B, H, W, C] であることを前提に処理
+        if img.ndim == 4:
             for i in range(img.shape[0]):
+                # 1枚ずつ取り出して numpy 化
                 img_np = img[i].cpu().numpy()
                 unpacked_images.append(ensure_rgb(img_np))
-        elif img.ndim == 3: # 単一画像
+        elif img.ndim == 3:
             unpacked_images.append(ensure_rgb(img.cpu().numpy()))
-        elif img.ndim == 2: # モノクロ
-            unpacked_images.append(ensure_rgb(img.cpu().numpy()))
+        else:
+            # 想定外の次元（(1,1,H,W,C)など）は squeeze で標準的な形を試みる
+            img_squeezed = img.squeeze()
+            if img_squeezed.ndim >= 2:
+                unpacked_images.append(ensure_rgb(img_squeezed.cpu().numpy()))
     return unpacked_images
 
 def ensure_rgb(img_np):
-    """モノクロをRGBに変換し、(H, W, 3)を保証する。また[0,1]を[0,255]のuint8にする"""
+    # 1. (H, W) の 2次元配列なら (H, W, 3) に拡張
     if img_np.ndim == 2:
         img_np = np.stack([img_np] * 3, axis=-1)
-    
-    # 浮動小数点(0-1)の場合は255倍して変換、既にuint8ならそのまま
-    if img_np.dtype != np.uint8:
-        img_np = np.clip(img_np * 255.0, 0, 255).astype(np.uint8)
+    # 2. 3次元配列の場合のチャンネル処理
+    elif img_np.ndim == 3:
+        ch = img_np.shape[-1]
+        if ch == 1: # (H, W, 1) -> (H, W, 3)
+            img_np = np.concatenate([img_np] * 3, axis=-1)
+        elif ch == 4: # (H, W, 4) -> (H, W, 3)
+            img_np = img_np[:, :, :3]
+        elif ch != 3:
+            # 万が一 2ch や 5ch 以上が来た場合、無理やり 3ch に調整（エラー防止）
+            img_np = img_np[:, :, :3] if ch > 3 else np.pad(img_np, ((0,0),(0,0),(0, 3-ch)))
     return img_np
 
 def unpack_list(any_list):

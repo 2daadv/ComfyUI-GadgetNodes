@@ -1,5 +1,6 @@
 from __future__ import annotations
-import base64,hashlib,os,re,threading
+import base64,hashlib,os,re,threading,math
+import torch.nn.functional as F
 import comfy,comfy.utils
 import torch
 import numpy as np
@@ -18,7 +19,7 @@ ASPECT_RATIO_OPTIONS = [
                     "7:9", "9:7",    # SDXL素材
                     "9:16", "16:9",  # スマホ/YouTube
                     "9:21", "21:9",  # ウルトラワイド
-                    "4:3", "3:4",    # 旧来モニタ
+                    "3:4", "4:3",    # 旧来モニタ
                     "Any"            # 自由
                 ]
 
@@ -58,7 +59,7 @@ class ManualCropImagesNode:
         # 1回目のプログレスバー：プレビュー生成
         pbar = comfy.utils.ProgressBar(total)
         for img in images:
-            i = Image.fromarray(img) # unpack_imagesでuint8化済み
+            i = Image.fromarray((np.clip(img, 0, 1) * 255).astype(np.uint8))
             i.thumbnail((512, 512), Image.Resampling.BOX) # 高速なBOXに変更
             buffer = BytesIO()
             i.save(buffer, format="WebP", quality=75)
@@ -104,8 +105,7 @@ class ManualCropImagesNode:
                 ch = max(1, min(int(c['h'] * h), h - y))
 
                 cropped_np = img[y:y+ch, x:x+cw, :]
-                # ComfyUI形式 [1, H, W, C] (0-1 float32) に戻す
-                cropped_tensor = torch.from_numpy(cropped_np.astype(np.float32) / 255.0).unsqueeze(0)
+                cropped_tensor = torch.from_numpy(cropped_np).unsqueeze(0)
                 output_list.append(cropped_tensor)
                 pbar.update(1)
 
@@ -226,7 +226,7 @@ class ImageIndicesSelectorNode:
             if comfy.model_management.processing_interrupted():
                 return (ExecutionBlocker(None),)
 
-            img_pil = Image.fromarray(img_np)
+            img_pil = Image.fromarray((np.clip(img_np, 0, 1) * 255).astype(np.uint8))
             img_pil.thumbnail((512, 512), Image.Resampling.BOX) # 高速なBOXに変更
 
             buffered = BytesIO()
@@ -277,3 +277,128 @@ async def select_callback(request):
         return web.json_response({"status": "ok"})
 
     return web.json_response({"status": "error", "message": "Invalid or expired node_id"}, status=400)
+
+#=============================================================================
+class SmartResizeImageNode:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "images": ("IMAGE",),
+                "target_pixels": ("INT", {"default": 1048576, "min": 64, "max": 16777216, "step": 64}),
+                "divisible_by": ("INT", {"default": 64, "min": 8, "max": 128, "step": 8}),
+                "distortion_threshold": ("FLOAT", {"default": 0.005, "min": 0.0, "max": 0.1, "step": 0.001}),
+                "crop_position": (["auto", "center", "left", "right", "top", "bottom"], {"default": "auto"}),
+                "upscale_to": (["target_pixels", "match_divisible_by"], {"default": "match_divisible_by"}),
+                "upscale_method": (["bicubic", "lanczos", "area"], {"default": "bicubic"}),
+            }
+        }
+
+    INPUT_IS_LIST = True
+    RETURN_TYPES = ("IMAGE", "INT", "INT")
+    RETURN_NAMES = ("images", "widths", "heights")
+    OUTPUT_IS_LIST = (True, True, True)
+    FUNCTION = "resize_images"
+    CATEGORY = CATEGORY_IMAGE
+
+    def resize_images(self, images, target_pixels, divisible_by, distortion_threshold, crop_position, upscale_to, upscale_method):
+        # 共通部品を使用してリストを平坦化 (結果は uint8 numpy [H, W, 3] のリスト)
+        flat_images_np = unpack_images(images)
+        total_images = len(flat_images_np)
+        target_pixels = target_pixels[0]
+        divisible_by = divisible_by[0]
+        distortion_threshold = distortion_threshold[0]
+        crop_position = crop_position[0]
+        upscale_to = upscale_to[0]
+        upscale_method = upscale_method[0]
+
+        out_images = []
+        out_widths = []
+        out_heights = []
+
+        pbar = comfy.utils.ProgressBar(total_images)
+
+        for i, img_np in enumerate(flat_images_np):
+            if comfy.model_management.processing_interrupted():
+                return (([ExecutionBlocker(None)],), ([],), ([],))
+
+            # numpy [H, W, 3] (uint8) -> torch [1, H, W, 3] (float32, 0-1)
+            img = torch.from_numpy(img_np)
+            if img.dtype != torch.float32:
+                img = img.float() / 255.0
+            img = img.unsqueeze(0) # [1, H, W, 3]
+
+            _, old_h, old_w, _ = img.shape
+            aspect_ratio = old_w / old_h
+
+            # 1. ターゲットサイズの決定
+            current_pixels = old_w * old_h
+            if upscale_to == "match_divisible_by" and current_pixels < target_pixels:
+                target_w = int(round(old_w / divisible_by) * divisible_by)
+                target_h = int(round(old_h / divisible_by) * divisible_by)
+            else:
+                ideal_w = math.sqrt(target_pixels * aspect_ratio)
+                ideal_h = target_pixels / ideal_w
+                target_w = int(round(ideal_w / divisible_by) * divisible_by)
+                target_h = int(round(ideal_h / divisible_by) * divisible_by)
+
+            # 2. バイパス判定 (サイズが完璧なら何もしない)
+            if old_w == target_w and old_h == target_h:
+                out_images.append(img)
+                out_widths.append(target_w)
+                out_heights.append(target_h)
+                pbar.update(1)
+                continue
+
+            # 3. リサイズ・クロップ処理
+            actual_aspect = target_w / target_h
+            distortion = abs(actual_aspect - aspect_ratio) / aspect_ratio
+
+            if distortion <= distortion_threshold:
+                final_img = self.perform_resize(img, target_w, target_h, upscale_method)
+            else:
+                resize_ratio = max(target_w / old_w, target_h / old_h)
+                inter_w = int(math.ceil(old_w * resize_ratio))
+                inter_h = int(math.ceil(old_h * resize_ratio))
+
+                temp_img = self.perform_resize(img, inter_w, inter_h, upscale_method)
+                x, y = self.calculate_crop_pos(temp_img, target_w, target_h, crop_position)
+                final_img = temp_img[:, y:y+target_h, x:x+target_w, :]
+
+            out_images.append(final_img)
+            out_widths.append(target_w)
+            out_heights.append(target_h)
+            pbar.update(1)
+
+        return (out_images, out_widths, out_heights)
+
+    def perform_resize(self, img_tensor, tw, th, method):
+        if method == "lanczos":
+            # [1, H, W, C] -> PIL
+            i = 255. * img_tensor[0].cpu().numpy()
+            img_pil = Image.fromarray(np.clip(i, 0, 255).astype(np.uint8))
+            img_pil = img_pil.resize((tw, th), resample=Image.LANCZOS)
+            ret = np.array(img_pil).astype(np.float32) / 255.0
+            return torch.from_numpy(ret).unsqueeze(0).to(img_tensor.device)
+        else:
+            t_img = img_tensor.permute(0, 3, 1, 2)
+            t_img = F.interpolate(t_img, size=(th, tw), mode=method, align_corners=False)
+            return t_img.permute(0, 2, 3, 1)
+
+    def calculate_crop_pos(self, img, tw, th, pos):
+        _, ih, iw, _ = img.shape
+        dw, dh = iw - tw, ih - th
+
+        if pos == "auto":
+            if dw > 0:
+                l_std = torch.std(img[:, :, :dw, :])
+                r_std = torch.std(img[:, :, -dw:, :])
+                pos = "right" if l_std < r_std else "left"
+            else:
+                t_std = torch.std(img[:, :dh, :, :])
+                b_std = torch.std(img[:, -dh:, :, :])
+                pos = "bottom" if t_std < b_std else "top"
+
+        x = 0 if pos == "left" else dw if pos == "right" else dw // 2
+        y = 0 if pos == "top" else dh if pos == "bottom" else dh // 2
+        return x, y
