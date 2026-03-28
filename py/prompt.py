@@ -51,8 +51,8 @@ class CheckNsfwPromptNode:
         if prompt:
             return (
                 re.search(r"irrumatio|deepthroat|cunnilingus|anilingus|nipple|completely nude", prompt) or
-                re.search(r", *(sex|pussy|anus|penis|pee|[^,]+job)| (sex|pussy|anus|penis) *,", prompt)
-                ,)
+                re.search(r", *(sex|pussy|anus|penis|pee|[^,]+job)| (sex|pussy|anus|penis) *,", prompt),
+            )
         return (False,)
 
 class PromptToFileNameNode:

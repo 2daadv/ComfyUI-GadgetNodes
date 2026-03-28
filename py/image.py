@@ -51,6 +51,7 @@ class ManualCropImagesNode:
         m = hashlib.sha256()
         for img in images:
             m.update(img.tobytes())
+        m.update(aspect_ratio.encode())
         image_hash = m.hexdigest()
 
         total = len(images)
@@ -67,7 +68,7 @@ class ManualCropImagesNode:
             pbar.update(1)
 
         session = {"results": None, "event_obj": threading.Event()}
-        node_id = f"crop_{unique_id}"
+        node_id = f"crop_{unpack_list(unique_id)}"
         GADGET_SESSIONS[node_id] = session
 
         try:
@@ -242,7 +243,7 @@ class ImageIndicesSelectorNode:
             "result": None,
             "event_obj": threading.Event()
         }
-        node_id = f"select_{unique_id}"
+        node_id = f"select_{unpack_list(unique_id)}"
         GADGET_SESSIONS[node_id] = session
         try:
             PromptServer.instance.send_sync("gadget.show_selector", {
@@ -305,12 +306,12 @@ class SmartResizeImageNode:
         # 共通部品を使用してリストを平坦化 (結果は uint8 numpy [H, W, 3] のリスト)
         flat_images_np = unpack_images(images)
         total_images = len(flat_images_np)
-        target_pixels = target_pixels[0]
-        divisible_by = divisible_by[0]
-        distortion_threshold = distortion_threshold[0]
-        crop_position = crop_position[0]
-        upscale_to = upscale_to[0]
-        upscale_method = upscale_method[0]
+        target_pixels = unpack_list(target_pixels)
+        divisible_by = unpack_list(divisible_by)
+        distortion_threshold = unpack_list(distortion_threshold)
+        crop_position = unpack_list(crop_position)
+        upscale_to = unpack_list(upscale_to)
+        upscale_method = unpack_list(upscale_method)
 
         out_images = []
         out_widths = []
@@ -402,3 +403,102 @@ class SmartResizeImageNode:
         x = 0 if pos == "left" else dw if pos == "right" else dw // 2
         y = 0 if pos == "top" else dh if pos == "bottom" else dh // 2
         return x, y
+
+#=============================================================================
+class ImageRefinerNode:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "images": ("IMAGE",),
+                "median_enabled": ("BOOLEAN", {"default": True}),
+                "median_radius": ("INT", {"default": 1, "min": 1, "max": 8, "step": 1}),
+                "denoise_enabled": ("BOOLEAN", {"default": False}),
+                "denoise_intensity": ("FLOAT", {"default": 0.1, "min": 0.01, "max": 1.0, "step": 0.01}),
+                "aa_enabled": ("BOOLEAN", {"default": True}),
+                "aa_sigma": ("FLOAT", {"default": 0.5, "min": 0.1, "max": 5.0, "step": 0.1}),
+                "sharpen_enabled": ("BOOLEAN", {"default": False}),
+                "sharpen_amount": ("FLOAT", {"default": 1.0, "min": 0.1, "max": 5.0, "step": 0.1}),
+            }
+        }
+
+    INPUT_IS_LIST = True
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("images",)
+    OUTPUT_IS_LIST = (True,)
+    FUNCTION = "refine_images"
+    CATEGORY = CATEGORY_IMAGE
+
+    def refine_images(self, images, median_enabled, median_radius, denoise_enabled, denoise_intensity, aa_enabled, aa_sigma, sharpen_enabled, sharpen_amount):
+        flat_images_np = unpack_images(images)
+        total_images = len(flat_images_np)
+
+        # リスト入力の展開
+        m_en = unpack_list(median_enabled); m_r = unpack_list(median_radius)
+        d_en = unpack_list(denoise_enabled); d_i = unpack_list(denoise_intensity)
+        a_en = unpack_list(aa_enabled); a_s = unpack_list(aa_sigma)
+        s_en = unpack_list(sharpen_enabled); s_a = unpack_list(sharpen_amount)
+
+        out_images = []
+        pbar = comfy.utils.ProgressBar(total_images)
+        device = comfy.model_management.get_torch_device()
+
+        for i, img_np in enumerate(flat_images_np):
+            if comfy.model_management.processing_interrupted():
+                return (([ExecutionBlocker(None)],), )
+
+            # numpy [H,W,3] -> tensor [1,3,H,W]
+            img = torch.from_numpy(img_np).float().permute(2, 0, 1).unsqueeze(0).to(device)
+
+            # 1. Median (大きなノイズ掃除)
+            if m_en:
+                img = self.apply_median(img, m_r)
+
+            # 2. Denoise (Bilateral風: 面のザラつき抑制)
+            if d_en:
+                img = self.apply_denoise(img, d_i)
+
+            # 3. Anti-Alias (エッジの馴染ませ)
+            if a_en:
+                img = self.apply_gaussian(img, a_s)
+
+            # 4. Sharpen (ディテールの復元)
+            if s_en:
+                img = self.apply_sharpen(img, s_a)
+
+            out_images.append(img.permute(0, 2, 3, 1).cpu())
+            pbar.update(1)
+
+        return (out_images,)
+
+    def apply_median(self, x, r):
+        k = 2 * r + 1
+        b, c, h, w = x.shape
+        # [B, C*k*k, L] に展開
+        patches = F.unfold(x, kernel_size=k, padding=r)
+        # チャンネルごとに分離して計算
+        patches = patches.view(b, c, k*k, h*w)
+        result, _ = torch.median(patches, dim=2)
+        # 元の形状に戻す
+        return result.view(b, c, h, w)
+
+    def apply_denoise(self, x, intensity):
+        # 簡易的なバイラテラル効果: 弱いガウシアンと元の画像のブレンド
+        # 強度(intensity)に応じて、ディテールを保ちつつ平滑化
+        blurred = self.apply_gaussian(x, sigma=intensity * 2.0)
+        diff = torch.abs(x - blurred)
+        mask = torch.exp(-diff / (intensity + 1e-5))
+        return x * mask + blurred * (1.0 - mask)
+
+    def apply_gaussian(self, x, sigma):
+        k_size = int(2 * (math.ceil(sigma * 3)) + 1)
+        t = torch.arange(k_size).float().to(x.device) - (k_size - 1) / 2
+        kernel_1d = torch.exp(-t.pow(2) / (2 * sigma**2))
+        kernel_1d = kernel_1d / kernel_1d.sum()
+        kernel_2d = kernel_1d[:, None] * kernel_1d[None, :]
+        kernel_2d = kernel_2d.expand(x.shape[1], 1, k_size, k_size)
+        return F.conv2d(x, kernel_2d, padding=k_size//2, groups=x.shape[1])
+
+    def apply_sharpen(self, x, amount):
+        blurred = self.apply_gaussian(x, sigma=1.0)
+        return torch.clamp(x + (x - blurred) * amount, 0.0, 1.0)

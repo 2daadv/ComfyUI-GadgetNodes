@@ -33,7 +33,8 @@ NODE_CLASS_MAPPINGS = {
     "Crop Images (Manual)": ManualCropImagesNode,
     "Load Images From Folder": LoadImagesFromFolderNode,
     "Select Image Indices": ImageIndicesSelectorNode,
-    "Smart Resize Image": SmartResizeImageNode
+    "Smart Resize Images": SmartResizeImageNode,
+    "Refine Images": ImageRefinerNode
 }
 
 WEB_DIRECTORY = "./js"

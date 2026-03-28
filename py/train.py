@@ -71,3 +71,5 @@ async def save_tags(request):
     path = os.path.join(data['folder'], os.path.splitext(data['filename'])[0] + ".txt")
     with open(path, "w", encoding="utf-8") as f: f.write(data['tags'])
     return web.json_response({"status": "ok"})
+
+#---------------------------------------------------
