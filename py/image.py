@@ -5,7 +5,7 @@ import comfy,comfy.utils
 import torch
 import numpy as np
 from io import BytesIO
-from PIL import Image,ImageOps
+from PIL import Image,ImageOps,ImageFilter
 from aiohttp import web
 from server import PromptServer
 from comfy_execution.graph import ExecutionBlocker
@@ -13,14 +13,20 @@ from .utils import *
 
 CATEGORY_IMAGE = "Gadget/image"
 ASPECT_RATIO_OPTIONS = [
-                    "1:1",           # 正方形
-                    "4:5", "5:4",    # SNS/ポートレート
-                    "2:3", "3:2",    # カメラ標準
-                    "7:9", "9:7",    # SDXL素材
-                    "9:16", "16:9",  # スマホ/YouTube
-                    "9:21", "21:9",  # ウルトラワイド
-                    "3:4", "4:3",    # 旧来モニタ
-                    "Any"            # 自由
+                    "4:5",
+                    "7:9",
+                    "3:4",
+                    "2:3",
+                    "9:16",
+                    "9:21",
+                    "1:1",
+                    "5:4",
+                    "9:7",
+                    "4:3",
+                    "3:2",
+                    "16:9",
+                    "21:9",
+                    "Any"
                 ]
 
 class ManualCropImagesNode:
@@ -61,9 +67,10 @@ class ManualCropImagesNode:
         pbar = comfy.utils.ProgressBar(total)
         for img in images:
             i = Image.fromarray((np.clip(img, 0, 1) * 255).astype(np.uint8))
-            i.thumbnail((512, 512), Image.Resampling.BOX) # 高速なBOXに変更
+            i.thumbnail((512, 512), Image.Resampling.BILINEAR)
+            i = i.filter(ImageFilter.SHARPEN)
             buffer = BytesIO()
-            i.save(buffer, format="WebP", quality=75)
+            i.save(buffer, format="WebP", quality=85, method=6)
             preview_imgs.append(f"data:image/webp;base64,{base64.b64encode(buffer.getvalue()).decode('utf-8')}")
             pbar.update(1)
 
@@ -228,10 +235,11 @@ class ImageIndicesSelectorNode:
                 return (ExecutionBlocker(None),)
 
             img_pil = Image.fromarray((np.clip(img_np, 0, 1) * 255).astype(np.uint8))
-            img_pil.thumbnail((512, 512), Image.Resampling.BOX) # 高速なBOXに変更
+            img_pil.thumbnail((512, 512), Image.Resampling.BILINEAR)
+            img_pil = img_pil.filter(ImageFilter.SHARPEN)
 
             buffered = BytesIO()
-            img_pil.save(buffered, format="WebP", quality=75)
+            img_pil.save(buffered, format="WebP", quality=85, method=6)
             img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
             image_data_list.append({"src": f"data:image/webp;base64,{img_b64}"})
             hasher.update(img_b64[:100].encode())
