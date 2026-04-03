@@ -134,11 +134,13 @@ class CropDialog {
         const prev = GLOBAL_CROP_STATES[this.node_id];
         if (prev && prev.hash === this.image_hash) {
             this.results = JSON.parse(JSON.stringify(prev.results));
+            this.is_cached = true;
         } else {
             this.results = this.images.map(() => ({
                 x: 0.1, y: 0.1, w: 0.8, h: 0.8,
                 ratio: data.default_aspect_ratio
             }));
+            this.is_cached = false;
         }
         this.initUI();
     }
@@ -184,7 +186,7 @@ class CropDialog {
             content.appendChild(div);
 
             img.onload = () => {
-                if (!GLOBAL_CROP_STATES[this.node_id]) {
+                if (!this.is_cached) {
                     const initial = this.calculateInitialCrop(img.naturalWidth, img.naturalHeight, this.results[i].ratio);
                     Object.assign(this.results[i], initial);
                 }

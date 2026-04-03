@@ -93,7 +93,7 @@ class SDLoraInfoEditorNode:
             "optional": {
                 "lora_prompt": ("STRING", {"default": "", "multiline": True}),
                 "description": ("STRING", {"default": "", "multiline": True}),
-                "sd_version": ("STRING", {"default": "", "multiline": False}),
+                "sd_version": ("STRING", {"default": "SDXL", "multiline": False}),
                 "activation_text": ("STRING", {"default": "", "multiline": True}),
                 "preferred_weight": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.1}),
                 "negative_text": ("STRING", {"default": "", "multiline": False}),
@@ -106,7 +106,7 @@ class SDLoraInfoEditorNode:
     FUNCTION = "run"
     CATEGORY = CATEGORY_MODEL
 
-    def run(self, lora_name, lora_prompt="", description="", sd_version="", activation_text="", preferred_weight=1.0, negative_text="", notes=""):
+    def run(self, lora_name, lora_prompt="", description="", sd_version="SDXL", activation_text="", preferred_weight=1.0, negative_text="", notes=""):
         return (lora_name, lora_prompt, description, sd_version, activation_text, preferred_weight, negative_text, notes)
 
 
@@ -183,7 +183,7 @@ class SDCheckpointInfoEditorNode:
             "optional": {
                 "description": ("STRING", {"default": "", "multiline": True}),
                 "notes": ("STRING", {"default": "", "multiline": True}),
-                "vae": ("STRING", {"default": "", "multiline": False}),
+                "vae": ("STRING", {"default": "None", "multiline": False}),
             }
         }
     RETURN_TYPES = (any_type, "STRING", "STRING", "STRING",)
@@ -192,7 +192,7 @@ class SDCheckpointInfoEditorNode:
     FUNCTION = "run"
     CATEGORY = CATEGORY_MODEL
 
-    def run(self, ckpt_name, description="", notes="", vae="",):
+    def run(self, ckpt_name, description="", notes="", vae="None",):
         return (ckpt_name, description, notes, vae,)
 
 

@@ -92,7 +92,7 @@ app.registerExtension({
                     const defaults = {
                         "lora_prompt": "",
                         "description": "",
-                        "sd_version": "",
+                        "sd_version": "SDXL",
                         "activation_text": "",
                         "preferred_weight": 1.0,
                         "negative_text": "",
@@ -316,7 +316,7 @@ app.registerExtension({
                     const defaults = {
                         "description": "",
                         "notes": "",
-                        "vae": ""
+                        "vae": "None"
                     };
                     for (const [key, val] of Object.entries(defaults)) {
                         const w = getW(key);
