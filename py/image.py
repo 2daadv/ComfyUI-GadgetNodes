@@ -438,14 +438,17 @@ class ImageRefinerNode:
     CATEGORY = CATEGORY_IMAGE
 
     def refine_images(self, images, median_enabled, median_radius, denoise_enabled, denoise_intensity, aa_enabled, aa_sigma, sharpen_enabled, sharpen_amount):
-        flat_images_np = unpack_images(images)
-        total_images = len(flat_images_np)
-
         # リスト入力の展開
         m_en = unpack_list(median_enabled); m_r = unpack_list(median_radius)
         d_en = unpack_list(denoise_enabled); d_i = unpack_list(denoise_intensity)
         a_en = unpack_list(aa_enabled); a_s = unpack_list(aa_sigma)
         s_en = unpack_list(sharpen_enabled); s_a = unpack_list(sharpen_amount)
+
+        if not any([m_en, d_en, a_en, s_en]):
+            return (flatten(images),)
+
+        flat_images_np = unpack_images(images)
+        total_images = len(flat_images_np)
 
         out_images = []
         pbar = comfy.utils.ProgressBar(total_images)
