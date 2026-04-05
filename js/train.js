@@ -48,7 +48,7 @@ app.registerExtension({
         // --- データ更新用関数 ---
         const updateAll = async (node, canvas, midList, rightList) => {
             const folder = node.widgets.find(w => w.name === "folder").value;
-            const imageWidget = node.widgets.find(w => w.name === "selected_image");
+            const imageWidget = node.widgets.find(w => w.name === "image_file_name");
 
             if (!folder) return;
 
@@ -151,7 +151,7 @@ app.registerExtension({
             node.addDOMWidget("main_editor_ui", "div", mainView);
 
             const folderWidget = node.widgets.find(w => w.name === "folder");
-            const imageWidget = node.widgets.find(w => w.name === "selected_image");
+            const imageWidget = node.widgets.find(w => w.name === "image_file_name");
             const keepTagsWidget = node.widgets.find(w => w.name === "keep_tags");
             const removeTagsWidget = node.widgets.find(w => w.name === "remove_tags");
 

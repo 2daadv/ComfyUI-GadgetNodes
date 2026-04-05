@@ -3,6 +3,9 @@ import os,yaml
 from .utils import *
 from server import PromptServer
 from aiohttp import web
+import torch
+import numpy as np
+from PIL import Image, ImageOps
 
 CATEGORY_TRAIN = "Gadget/train"
 TRAIN_CONFIG_FILE_PATH = BASE_DIR / "train_config.yaml"
@@ -22,21 +25,54 @@ class TrainTagsEditNode:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "folder": ("STRING", {"default": ""}), 
-                "selected_image": ([],), 
+                "folder": ("STRING", {"default": ""}),
+                "image_file_name": ([],),
             },
             "optional": {
                 "keep_tags": ("STRING", {"default": "", "multiline": True}),
                 "remove_tags": ("STRING", {"default": "", "multiline": True}),
             },
         }
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("folder",)
-    FUNCTION = "noop"
+    RETURN_TYPES = ("STRING","STRING","IMAGE",)
+    RETURN_NAMES = ("folder","image_file_path","image")
+    FUNCTION = "run"
     CATEGORY = CATEGORY_TRAIN
 
-    def noop(self, folder, selected_image, keep_tags="", remove_tags=""):
-        return (folder,)
+    @classmethod
+    def VALIDATE_INPUTS(s, folder, image_file_name, **kwargs):
+        if not folder:
+            return "Folder path is required."
+        if not image_file_name:
+            return "Image file name is required."
+
+        # image_file_name がリストで届く場合の処理
+        image_file_name = unpack_list(image_file_name)
+        if not image_file_name:
+            return "Image file name is empty."
+
+        # 2. ファイルの実在チェック
+        full_path = os.path.join(folder, image_file_name)
+        if not os.path.exists(full_path):
+            return f"File not found: {full_path}"
+
+        return True
+
+    def run(self, folder, image_file_name, keep_tags="", remove_tags=""):
+        image_file_name = unpack_list(image_file_name)
+        full_path = os.path.join(folder, image_file_name)
+
+        # 2. 画像の読み込みとテンソル変換
+        img = Image.open(full_path)
+        img = ImageOps.exif_transpose(img) # 方向情報を補正
+        image = img.convert("RGB")
+
+        # ComfyUIの標準形式 [Batch=1, Height, Width, Channels] に変換
+        image = np.array(image).astype(np.float32) / 255.0
+        image = torch.from_numpy(image)[None, ...]
+
+        # 3. 戻り値の返却
+        # WD14Taggerなどのノードには "image" 出力を接続します
+        return (folder, full_path, image,)
 
 
 @PromptServer.instance.routes.get("/gadget_nodes/train/get_images")
