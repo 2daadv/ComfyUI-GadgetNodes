@@ -17,7 +17,14 @@ if (!document.getElementById("gadget-train-style")) {
         .train-popup-img { max-width: 90vw; max-height: 90vh; width: auto; height: auto; display: block; user-select: none; cursor: pointer; box-shadow: 0 0 20px rgba(0,0,0,0.5); }
         .train-popup-mask { position: absolute; top: 0; left: 0; pointer-events: none; opacity: 0.6; display: none; }
 
-        .train-list { flex: 1; background: #111; color: #eee; font-size: 11px; outline: none; overflow-y: auto; user-select: none; border: none; }
+        .train-list {
+            position: relative !important;
+            flex: 1;             /* 親要素の空きスペースを埋める */
+            overflow-y: auto;    /* 溢れた場合にスクロールバーを表示 */
+            min-height: 0;       /* Flexbox内で要素が縮小できるようにするために必須 */
+            background: #111;
+            border-top: 1px solid #444;
+        }
         .train-tag-item {
             display: flex; align-items: center; padding: 3px 6px; 
             cursor: pointer; border-bottom: 1px solid #222; gap: 6px;
@@ -28,6 +35,17 @@ if (!document.getElementById("gadget-train-style")) {
         .drag-handle { color: #666; cursor: grab; font-size: 12px; padding: 0 2px; }
         .drag-handle:hover { color: #fff; }
         .tag-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .drop-indicator {
+            position: absolute;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: #ffaa00;
+            pointer-events: none;
+            display: none;
+            z-index: 9999; /* 最前面に */
+            box-shadow: 0 0 5px rgba(255, 170, 0, 0.8);
+        }
     `;
     document.head.appendChild(style);
 }
@@ -56,6 +74,11 @@ app.registerExtension({
             el.value = value;
             el.draggable = false;
             return el;
+        };
+        const clearListTags = (listEl) => {
+            Array.from(listEl.children).forEach(child => {
+                if (child.classList.contains("train-tag-item")) child.remove();
+            });
         };
         // --- データ更新用関数 ---
         const updateAll = async (node, canvas, midList, rightList) => {
@@ -93,11 +116,12 @@ app.registerExtension({
             };
             img.src = data.img;
 
-            midList.innerHTML = ""; rightList.innerHTML = "";
+            clearListTags(midList);
+            clearListTags(rightList);
             data.tags.forEach((t, i) => {
                 const item = createTag(t, i);
-                if (data.blacklist.includes(t)) rightList.add(item);
-                else midList.add(item);
+                if (data.blacklist.includes(t)) rightList.appendChild(item);
+                else midList.appendChild(item);
             });
         };
 
@@ -137,19 +161,28 @@ app.registerExtension({
 
             const createBox = (title, isKeepList = false) => {
                 const box = document.createElement("div");
-                box.style.cssText = "width: 180px; min-width: 180px; display: flex; flex-direction: column; border: 1px solid #444;";
-                box.innerHTML = `<div style='font-size:11px; text-align:center; padding:2px; background:#333;'>${title}</div>`;
+                box.style.cssText = "width: 180px; min-width: 180px; height: 100%; display: flex; flex-direction: column; border: 1px solid #444; background: #222;";
+                box.innerHTML = `<div style='font-size:11px; text-align:center; padding:4px; background:#333; font-weight:bold;'>${title}</div>`;
 
                 const list = document.createElement("div");
                 list.className = "train-list";
 
-                Object.defineProperty(list, "options", { get: () => Array.from(list.children) });
-                Object.defineProperty(list, "selectedOptions", { get: () => list.querySelectorAll(".selected") });
+                const indicator = document.createElement("div");
+                indicator.className = "drop-indicator";
+                list.appendChild(indicator);
+
+                Object.defineProperty(list, "options", {
+                    get: () => Array.from(list.children).filter(c => c.classList.contains("train-tag-item"))
+                });
+                Object.defineProperty(list, "selectedOptions", {
+                    get: () => list.querySelectorAll(".train-tag-item.selected")
+                });
                 list.add = (el) => { list.appendChild(el); };
 
                 let isSelecting = false;
                 let lastSelectedIndex = -1;
                 let dragStartIndex = -1; // ドラッグ開始位置を保持
+                let dropTargetRef = null;
 
                 list.addEventListener("mousedown", (e) => {
                     const items = Array.from(list.children);
@@ -220,41 +253,61 @@ app.registerExtension({
                 }, { capture: true });
 
                 if (isKeepList) {
-                    list.addEventListener("dragstart", (e) => {
-                        if (e.target.draggable) {
-                            node._draggedItems.forEach(item => item.classList.add("dragging"));
-                        } else {
-                            e.preventDefault();
-                        }
-                    });
-                    list.addEventListener("dragend", (e) => {
-                        if (node._draggedItems) {
-                            node._draggedItems.forEach(item => item.classList.remove("dragging"));
-                            node._draggedItems = null;
-                        }
-                        e.target.draggable = false;
-                    });
                     list.addEventListener("dragover", (e) => {
                         e.preventDefault();
-                        if (!node._draggedItems || node._draggedItems.length === 0) return;
+                        if (!node._draggedItems) return;
 
                         const targetItem = e.target.closest(".train-tag-item");
-                        // ターゲットがリスト内にない、または選択中のアイテム自体ならスキップ
-                        if (!targetItem || node._draggedItems.includes(targetItem)) return;
+                        indicator.style.display = "block";
 
-                        const box = targetItem.getBoundingClientRect();
-                        const isAfter = e.clientY > box.top + box.height / 2;
+                        if (targetItem) {
+                            const rect = targetItem.getBoundingClientRect();
+                            const isAfter = e.clientY > rect.top + rect.height / 2;
+                            dropTargetRef = isAfter ? targetItem.nextElementSibling : targetItem;
 
-                        // 挿入の基準となる要素を決定
-                        const referenceItem = isAfter ? targetItem.nextElementSibling : targetItem;
+                            // offsetTop を使用して正確な位置を計算
+                            const lineY = isAfter ? targetItem.offsetTop + targetItem.offsetHeight : targetItem.offsetTop;
+                            indicator.style.top = `${lineY}px`;
+                        } else {
+                            // リストの末尾
+                            const lastItem = Array.from(list.children)
+                                .filter(c => c.classList.contains("train-tag-item")).pop();
+                            if (lastItem) {
+                                dropTargetRef = null;
+                                indicator.style.top = `${lastItem.offsetTop + lastItem.offsetHeight}px`;
+                            } else {
+                                indicator.style.top = "0px";
+                            }
+                        }
+                    });
 
-                        // 選択された塊の「現在のDOM上の並び順」を維持したまま、
-                        // 基準要素の前に一つずつ挿入していく
-                        node._draggedItems.forEach(item => {
-                            // insertBeforeは「既存の要素を移動させる」挙動になるため、
-                            // ループで順番に送ることで塊の状態を維持できる
-                            list.insertBefore(item, referenceItem);
-                        });
+                    list.addEventListener("dragleave", (e) => {
+                        // マウスがリストの外に出た時だけ消す
+                        if (!list.contains(e.relatedTarget)) {
+                            indicator.style.display = "none";
+                        }
+                    });
+
+                    list.addEventListener("dragend", (e) => {
+                        indicator.style.display = "none";
+
+                        // 並べ替え実行 (dropTargetRef が undefined でないことを確認)
+                        if (node._draggedItems && dropTargetRef !== undefined) {
+                            // 自分自身の位置への挿入を回避するチェック
+                            const itemsToMove = node._draggedItems;
+                            if (!itemsToMove.includes(dropTargetRef)) {
+                                itemsToMove.forEach(item => {
+                                    list.insertBefore(item, dropTargetRef);
+                                });
+                            }
+                        }
+
+                        // クリーンアップ
+                        if (node._draggedItems) {
+                            node._draggedItems.forEach(item => item.classList.remove("dragging"));
+                        }
+                        node._draggedItems = null;
+                        dropTargetRef = null;
                     });
                 }
 
@@ -302,26 +355,28 @@ app.registerExtension({
 
             // --- タグ操作ロジック ---
             btnKeep.onclick = () => {
-                if (!keepTagsWidget.value) return;
+                // inputEl から直接値を読み取る
+                const val = keepTagsWidget.inputEl ? keepTagsWidget.inputEl.value : keepTagsWidget.value;
+                if (!val) return;
+
                 const existing = new Set(Array.from(mid.list.options).map(o => o.text.trim()));
-                keepTagsWidget.value.split(",").forEach(t => {
+                val.split(",").forEach(t => {
                     const txt = t.trim();
                     if (txt && !existing.has(txt)) {
-                        mid.list.add(createTag(txt, Date.now() + Math.random()));
-                        existing.add(txt);
+                        mid.list.appendChild(createTag(txt, Date.now() + Math.random()));
                     }
                 });
             };
 
             // Removeボタンの処理：keep_tags(mid)にあればremove_tags(right)へ移動
             btnRemove.onclick = () => {
-                if (!removeTagsWidget.value) return;
-                const targets = removeTagsWidget.value.split(",").map(t => t.trim()).filter(t => t);
+                const val = removeTagsWidget.inputEl ? removeTagsWidget.inputEl.value : removeTagsWidget.value;
+                if (!val) return;
+
+                const targets = val.split(",").map(t => t.trim()).filter(t => t);
                 targets.forEach(tag => {
                     const foundOption = Array.from(mid.list.options).find(o => o.text === tag);
-                    if (foundOption) {
-                        right.list.add(foundOption); 
-                    }
+                    if (foundOption) right.list.appendChild(foundOption);
                 });
             };
 
@@ -387,13 +442,35 @@ app.registerExtension({
                     setTimeout(() => overlay.remove(), 200);
                 };
             };
-
-            btnRight.onclick = () => Array.from(mid.list.selectedOptions).forEach(o => { o.classList.remove("selected"); right.list.add(o); });
-            btnLeft.onclick = () => Array.from(right.list.selectedOptions).forEach(o => { o.classList.remove("selected"); mid.list.add(o); });
-
-            btnUp.onclick = () => Array.from(mid.list.selectedOptions).forEach(o => { if (o.previousElementSibling) mid.list.insertBefore(o, o.previousElementSibling); });
-            btnDown.onclick = () => Array.from(mid.list.selectedOptions).reverse().forEach(o => { if (o.nextElementSibling) mid.list.insertBefore(o, o.nextElementSibling.nextElementSibling); });
-
+            btnRight.onclick = () => {
+                Array.from(mid.list.selectedOptions).forEach(o => {
+                    o.classList.remove("selected");
+                    right.list.appendChild(o);
+                });
+            };
+            btnLeft.onclick = () => {
+                Array.from(right.list.selectedOptions).forEach(o => {
+                    o.classList.remove("selected");
+                    mid.list.appendChild(o);
+                });
+            };
+            btnUp.onclick = () => {
+                Array.from(mid.list.selectedOptions).forEach(o => {
+                    // 前の要素が存在し、かつそれがタグである場合のみ移動
+                    if (o.previousElementSibling && o.previousElementSibling.classList.contains("train-tag-item")) {
+                        mid.list.insertBefore(o, o.previousElementSibling);
+                    }
+                });
+            };
+            btnDown.onclick = () => {
+                Array.from(mid.list.selectedOptions).reverse().forEach(o => {
+                    const next = o.nextElementSibling;
+                    // 次の要素がタグである場合のみ、その次へ挿入
+                    if (next && next.classList.contains("train-tag-item")) {
+                        mid.list.insertBefore(o, next.nextElementSibling);
+                    }
+                });
+            };
             btnSave.onclick = async () => {
                 const tags = Array.from(mid.list.options).map(o => o.text).join(",");
                 await api.fetchApi("/gadget_nodes/train/save_tags", {
