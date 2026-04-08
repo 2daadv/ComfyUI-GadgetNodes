@@ -246,6 +246,21 @@ app.registerExtension({
                     }
                 });
 
+                // --- Ctrl+C で選択項目をコピー ---
+                list.addEventListener("keydown", (e) => {
+                    if ((e.ctrlKey || e.metaKey) && e.key === "c") {
+                        const selected = Array.from(list.selectedOptions);
+                        if (selected.length === 0) return;
+                        const textToCopy = selected.map(item => item.textContent.replace("⠿","").trim()).join(",");
+                        navigator.clipboard.writeText(textToCopy);
+                        e.preventDefault(); // ブラウザ標準のコピー挙動を抑制
+                    }
+                });
+
+                // キーボードイベントを受け取るために tabindex が必要
+                list.tabIndex = 0;
+                list.style.outline = "none"; // フォーカス時の枠線を消す
+
                 window.addEventListener("mouseup", () => {
                     isSelecting = false;
                     dragStartIndex = -1;
@@ -364,6 +379,7 @@ app.registerExtension({
                     const txt = t.trim();
                     if (txt && !existing.has(txt)) {
                         mid.list.appendChild(createTag(txt, Date.now() + Math.random()));
+                        existing.add(txt);
                     }
                 });
             };
