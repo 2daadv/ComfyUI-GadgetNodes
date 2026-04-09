@@ -63,11 +63,20 @@ class TagTrainModel {
         this.lastInteractedListEl = null;
         /** @type {HTMLElement[]} keep / remove のリスト要素（どちらにフォーカスがあるか判定用） */
         this.tagListEls = [];
+        /** @type {TagListView[]} */
+        this.tagListViews = [];
+        /** @type {{ sourceView: TagListView, items: HTMLElement[], crossListMoved: boolean } | null} */
+        this.dragSession = null;
     }
 
     /** @param {HTMLElement} el */
     registerTagListEl(el) {
         if (!this.tagListEls.includes(el)) this.tagListEls.push(el);
+    }
+
+    /** @param {TagListView} view */
+    registerTagListView(view) {
+        if (!this.tagListViews.includes(view)) this.tagListViews.push(view);
     }
 
     /** @param {string[]} tags @param {string[]} blacklist */
@@ -88,12 +97,13 @@ class TagTrainModel {
 
 class TagListView {
     /**
-     * @param {{ title: string, columnKey: "keep"|"remove", enableReorder: boolean, model: TagTrainModel, signal: AbortSignal }} opts
+     * @param {{ title: string, columnKey: "keep"|"remove", enableReorder: boolean, model: TagTrainModel, signal: AbortSignal, allowCrossListMove?: boolean }} opts
      */
     constructor(opts) {
         this.model = opts.model;
         this.columnKey = opts.columnKey;
         this.enableReorder = opts.enableReorder;
+        this.allowCrossListMove = opts.allowCrossListMove !== false;
         this.nodeSignal = opts.signal;
 
         this.draggedItems = null;
@@ -124,6 +134,7 @@ class TagListView {
         this.listEl.tabIndex = 0;
 
         this.model.registerTagListEl(this.listEl);
+        this.model.registerTagListView(this);
 
         this._bindEvents();
     }
@@ -327,12 +338,13 @@ class TagListView {
             { capture: true, signal: nodeSignal }
         );
 
-        if (enableReorder) {
+        if (enableReorder || this.allowCrossListMove) {
             listEl.addEventListener("dragstart", (e) => this._onDragStart(e), { signal: nodeSignal });
-            listEl.addEventListener("dragover", (e) => this._onDragOver(e), { signal: nodeSignal });
-            listEl.addEventListener("dragleave", (e) => this._onDragLeave(e), { signal: nodeSignal });
             listEl.addEventListener("dragend", (e) => this._onDragEnd(e), { signal: nodeSignal });
         }
+        listEl.addEventListener("dragover", (e) => this._onDragOver(e), { signal: nodeSignal });
+        listEl.addEventListener("dragleave", (e) => this._onDragLeave(e), { signal: nodeSignal });
+        listEl.addEventListener("drop", (e) => this._onDrop(e), { signal: nodeSignal });
     }
 
     /** @param {PointerEvent} e */
@@ -353,7 +365,7 @@ class TagListView {
         if (currentIndex < 0) return;
 
         const isHandle = e.target.classList.contains("drag-handle");
-        if (isHandle && this.enableReorder) {
+        if (isHandle && (this.enableReorder || this.allowCrossListMove)) {
             if (!target.classList.contains("selected")) {
                 items.forEach((c) => c.classList.remove("selected"));
                 target.classList.add("selected");
@@ -442,12 +454,19 @@ class TagListView {
         this.dropTargetRef = null;
         this.draggedItems = this.getTagItems().filter((i) => i.classList.contains("selected"));
         this.draggedItems.forEach((i) => i.classList.add("dragging"));
+        this.model.dragSession = {
+            sourceView: this,
+            items: this.draggedItems,
+            crossListMoved: false,
+        };
     }
 
     /** @param {DragEvent} e */
     _onDragOver(e) {
         e.preventDefault();
-        if (!this.draggedItems) return;
+        const session = this.model.dragSession;
+        if (!session || session.items.length === 0) return;
+        if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
 
         const targetItem = e.target.closest(".train-tag-item");
         this.indicator.style.display = "block";
@@ -478,12 +497,36 @@ class TagListView {
     }
 
     /** @param {DragEvent} e */
+    _onDrop(e) {
+        e.preventDefault();
+        const session = this.model.dragSession;
+        if (!session || session.items.length === 0) return;
+
+        this.indicator.style.display = "none";
+
+        if (session.sourceView === this) return;
+
+        const itemsToMove = session.items;
+        if (itemsToMove.includes(this.dropTargetRef)) return;
+        itemsToMove.forEach((item) => {
+            this.listEl.insertBefore(item, this.dropTargetRef);
+        });
+
+        session.sourceView.syncFromDom();
+        this.syncFromDom();
+        session.crossListMoved = true;
+    }
+
+    /** @param {DragEvent} e */
     _onDragEnd(e) {
         this.indicator.style.display = "none";
 
-        if (this.draggedItems) {
-            const itemsToMove = this.draggedItems;
-            if (!itemsToMove.includes(this.dropTargetRef)) {
+        const session = this.model.dragSession;
+        if (!session) return;
+
+        if (session.sourceView === this && !session.crossListMoved) {
+            const itemsToMove = session.items;
+            if (itemsToMove.length > 0 && !itemsToMove.includes(this.dropTargetRef)) {
                 itemsToMove.forEach((item) => {
                     this.listEl.insertBefore(item, this.dropTargetRef);
                 });
@@ -491,14 +534,16 @@ class TagListView {
             this.syncFromDom();
         }
 
-        if (this.draggedItems) {
-            this.draggedItems.forEach((item) => {
-                item.classList.remove("dragging");
-                item.draggable = false;
-            });
-        }
-        this.draggedItems = null;
-        this.dropTargetRef = null;
+        session.items.forEach((item) => {
+            item.classList.remove("dragging");
+            item.draggable = false;
+        });
+        this.model.tagListViews.forEach((view) => {
+            view.indicator.style.display = "none";
+            view.dropTargetRef = null;
+            view.draggedItems = null;
+        });
+        this.model.dragSession = null;
     }
 }
 
@@ -622,7 +667,7 @@ if (!document.getElementById("gadget-train-style")) {
             font-size: 11px;
         }
         .train-column-box {
-            width: 180px;
+            width: 200px;
             min-width: 180px;
             height: 100%;
             display: flex;
