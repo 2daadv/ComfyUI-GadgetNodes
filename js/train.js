@@ -96,22 +96,28 @@ class TagTrainModel {
     }
 
     /** @param {"keep"|"remove"} columnKey @param {string[]} tags */
-    addTagsTo(columnKey, tags) {
+    insertTagsAt(columnKey, tags, index) {
         const target = columnKey === "keep" ? this.keep : this.remove;
         const other = columnKey === "keep" ? this.remove : this.keep;
+        const toInsert = [];
         for (const raw of tags) {
             const tag = (raw || "").trim();
             if (!tag) continue;
             const otherIdx = other.indexOf(tag);
             if (otherIdx >= 0) other.splice(otherIdx, 1);
-            if (!target.includes(tag)) target.push(tag);
+            if (!target.includes(tag)) toInsert.push(tag);
+        }
+        if (index < 0 || index >= target.length) {
+            target.push(...toInsert);
+        } else {
+            target.splice(index, 0, ...toInsert);
         }
         this._dedupeAndDisjoint();
     }
 
     /** @param {"keep"|"remove"} columnKey @param {string[]} tags */
     moveTagsTo(columnKey, tags) {
-        this.addTagsTo(columnKey, tags);
+        this.insertTagsAt(columnKey, tags, -1);
     }
 
     /** @param {"keep"|"remove"} columnKey @param {string[]} orderedTags */
@@ -161,6 +167,7 @@ class TagListView {
         this.enableReorder = opts.enableReorder;
         this.allowCrossListMove = opts.allowCrossListMove !== false;
         this.nodeSignal = opts.signal;
+        this.onChanged = opts.onChanged; // 変更通知コールバック
 
         this.draggedItems = null;
         /** @type {Element | null} insertBefore の第2引数（null は末尾） */
@@ -221,6 +228,7 @@ class TagListView {
 
     syncFromDom() {
         this.model.setColumnFromOrdered(this.columnKey, this.getOrderedTagTexts());
+        this.onChanged?.(); // 並び替え等の同期後に通知
     }
 
     _renderAllViews(preserveCurrentSelection = true) {
@@ -246,8 +254,14 @@ class TagListView {
             .map((t) => t.trim())
             .filter((t) => t);
         if (tags.length === 0) return;
-        this.model.addTagsTo(this.columnKey, tags);
+        const indices = this.getTagItems().map((el, i) => (el.classList.contains("selected") ? i : -1)).filter((i) => i >= 0);
+        let index = -1;
+        if (indices.length > 0) {
+            index = Math.max(...indices) + 1;
+        }
+        this.model.insertTagsAt(this.columnKey, tags, index);
         this._renderAllViews(true);
+        this.onChanged?.();
     }
 
     _copySelectedText() {
@@ -826,6 +840,9 @@ if (!document.getElementById("gadget-train-style")) {
         .train-ctrl-btn-save {
             background: #282;
         }
+        .train-ctrl-btn-save.dirty {
+            background: #b22 !important;
+        }
         .train-list-focusable {
             outline: none;
         }
@@ -911,6 +928,12 @@ app.registerExtension({
 
             const tagModel = new TagTrainModel();
 
+            // Saveボタンの状態管理用ヘルパー
+            const setDirty = (dirty) => {
+                if (dirty) btnSave.classList.add("dirty");
+                else btnSave.classList.remove("dirty");
+            };
+
             const mainView = document.createElement("div");
             mainView.className = "train-main-view";
 
@@ -940,6 +963,7 @@ app.registerExtension({
                 enableReorder: true,
                 model: tagModel,
                 signal,
+                onChanged: () => setDirty(true)
             });
 
             const removeView = new TagListView({
@@ -948,6 +972,7 @@ app.registerExtension({
                 enableReorder: false,
                 model: tagModel,
                 signal,
+                onChanged: () => setDirty(true)
             });
 
             const controls = document.createElement("div");
@@ -992,6 +1017,7 @@ app.registerExtension({
                     tagModel.loadFromServer(data.tags, data.blacklist);
                     keepView.render(false);
                     removeView.render(false);
+                    setDirty(false); // 画像切り替え直後はクリーン
 
                     const ctx = thumbCanvas.getContext("2d");
                     const img = new Image();
@@ -1042,16 +1068,18 @@ app.registerExtension({
                 const val = keepTagsWidget.inputEl ? keepTagsWidget.inputEl.value : keepTagsWidget.value;
                 if (!val) return;
 
-                tagModel.addTagsTo("keep", val.split(","));
+                tagModel.moveTagsTo("keep", val.split(","));
                 renderTagViews(keepView);
+                setDirty(true);
             };
 
             btnRemove.onclick = () => {
                 const val = removeTagsWidget.inputEl ? removeTagsWidget.inputEl.value : removeTagsWidget.value;
                 if (!val) return;
 
-                tagModel.addTagsTo("remove", val.split(","));
+                tagModel.moveTagsTo("remove", val.split(","));
                 renderTagViews(removeView);
+                setDirty(true);
             };
 
             thumbCanvas.addEventListener(
@@ -1064,19 +1092,23 @@ app.registerExtension({
 
             btnRight.onclick = () => {
                 const sel = keepView.getSelectedTagTexts();
+                if (sel.length === 0) return;
                 tagModel.moveTagsTo("remove", sel);
                 renderTagViews();
+                setDirty(true);
             };
 
             btnLeft.onclick = () => {
                 const sel = removeView.getSelectedTagTexts();
+                if (sel.length === 0) return;
                 tagModel.moveTagsTo("keep", sel);
                 renderTagViews();
+                setDirty(true);
             };
 
             btnUp.onclick = () => {
                 keepView.applyMoveUpOnDom();
-                keepView.syncFromDom();
+                keepView.syncFromDom(); // sync内でsetDirty(true)が呼ばれる
             };
 
             btnDown.onclick = () => {
@@ -1087,6 +1119,7 @@ app.registerExtension({
             btnSave.onclick = async () => {
                 try {
                     await TrainApi.saveTags(folderWidget.value, imageWidget.value, tagModel.toSaveString());
+                    setDirty(false); // 保存成功でクリーンに戻る
                 } catch (err) {
                     console.error("[Gadget.TrainTagsEdit] save failed:", err);
                 }
