@@ -88,10 +88,66 @@ class TagTrainModel {
             if (bl.has(t)) this.remove.push(t);
             else this.keep.push(t);
         }
+        this._dedupeAndDisjoint();
     }
 
     toSaveString() {
         return this.keep.join(",");
+    }
+
+    /** @param {"keep"|"remove"} columnKey @param {string[]} tags */
+    addTagsTo(columnKey, tags) {
+        const target = columnKey === "keep" ? this.keep : this.remove;
+        const other = columnKey === "keep" ? this.remove : this.keep;
+        for (const raw of tags) {
+            const tag = (raw || "").trim();
+            if (!tag) continue;
+            const otherIdx = other.indexOf(tag);
+            if (otherIdx >= 0) other.splice(otherIdx, 1);
+            if (!target.includes(tag)) target.push(tag);
+        }
+        this._dedupeAndDisjoint();
+    }
+
+    /** @param {"keep"|"remove"} columnKey @param {string[]} tags */
+    moveTagsTo(columnKey, tags) {
+        this.addTagsTo(columnKey, tags);
+    }
+
+    /** @param {"keep"|"remove"} columnKey @param {string[]} orderedTags */
+    setColumnFromOrdered(columnKey, orderedTags) {
+        const unique = [];
+        const seen = new Set();
+        for (const raw of orderedTags) {
+            const tag = (raw || "").trim();
+            if (!tag || seen.has(tag)) continue;
+            seen.add(tag);
+            unique.push(tag);
+        }
+        if (columnKey === "keep") {
+            this.keep = unique;
+            this.remove = this.remove.filter((t) => !seen.has(t));
+        } else {
+            this.remove = unique;
+            this.keep = this.keep.filter((t) => !seen.has(t));
+        }
+        this._dedupeAndDisjoint();
+    }
+
+    _dedupeAndDisjoint() {
+        const uniq = (arr) => {
+            const out = [];
+            const s = new Set();
+            for (const raw of arr) {
+                const t = (raw || "").trim();
+                if (!t || s.has(t)) continue;
+                s.add(t);
+                out.push(t);
+            }
+            return out;
+        };
+        this.keep = uniq(this.keep);
+        this.remove = uniq(this.remove).filter((t) => !this.keep.includes(t));
     }
 }
 
@@ -164,7 +220,42 @@ class TagListView {
     }
 
     syncFromDom() {
-        this.model[this.columnKey] = this.getOrderedTagTexts();
+        this.model.setColumnFromOrdered(this.columnKey, this.getOrderedTagTexts());
+    }
+
+    _renderAllViews(preserveCurrentSelection = true) {
+        this.model.tagListViews.forEach((view) => {
+            view.render(view === this ? preserveCurrentSelection : false);
+        });
+    }
+
+    async _pasteFromClipboard() {
+        try {
+            const text = await navigator.clipboard.readText();
+            this._pasteText(text);
+        } catch (err) {
+            console.error("[Gadget.TrainTagsEdit] paste failed:", err);
+        }
+    }
+
+    /** @param {string} text */
+    _pasteText(text) {
+        if (!text) return;
+        const tags = text
+            .split(",")
+            .map((t) => t.trim())
+            .filter((t) => t);
+        if (tags.length === 0) return;
+        this.model.addTagsTo(this.columnKey, tags);
+        this._renderAllViews(true);
+    }
+
+    _copySelectedText() {
+        const selected = this.listEl.querySelectorAll(".train-tag-item.selected");
+        if (selected.length === 0) return "";
+        return Array.from(selected)
+            .map((item) => item.text)
+            .join(",");
     }
 
     applyMoveUpOnDom() {
@@ -276,14 +367,20 @@ class TagListView {
         const lower = key.length === 1 ? key.toLowerCase() : key;
 
         if ((e.ctrlKey || e.metaKey) && lower === "c") {
-            const selected = this.listEl.querySelectorAll(".train-tag-item.selected");
-            if (selected.length === 0) return;
-            const textToCopy = Array.from(selected)
-                .map((item) => item.text)
-                .join(",");
+            const textToCopy = this._copySelectedText();
+            if (!textToCopy) return;
             void navigator.clipboard.writeText(textToCopy);
             e.preventDefault();
+            e.stopImmediatePropagation();
             e.stopPropagation();
+            return;
+        }
+
+        if ((e.ctrlKey || e.metaKey) && lower === "v") {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            e.stopPropagation();
+            void this._pasteFromClipboard();
             return;
         }
 
@@ -291,6 +388,7 @@ class TagListView {
             items.forEach((el) => el.classList.add("selected"));
             this.lastSelectedIndex = items.length - 1;
             e.preventDefault();
+            e.stopImmediatePropagation();
             e.stopPropagation();
             return;
         }
@@ -300,12 +398,14 @@ class TagListView {
             const selIdx = items.map((el, i) => (el.classList.contains("selected") ? i : -1)).filter((i) => i >= 0);
             this.lastSelectedIndex = selIdx.length ? Math.max(...selIdx) : -1;
             e.preventDefault();
+            e.stopImmediatePropagation();
             e.stopPropagation();
             return;
         }
 
         if (!e.ctrlKey && !e.metaKey && !e.altKey && (key === "ArrowUp" || key === "ArrowDown")) {
             e.preventDefault();
+            e.stopImmediatePropagation();
             e.stopPropagation();
             this._moveSelectionArrow(key === "ArrowUp" ? -1 : 1);
             return;
@@ -313,6 +413,7 @@ class TagListView {
 
         if ((e.ctrlKey || e.metaKey) && !e.altKey && (key === "ArrowUp" || key === "ArrowDown")) {
             e.preventDefault();
+            e.stopImmediatePropagation();
             e.stopPropagation();
             this._adjustRangeCtrlArrow(key === "ArrowUp" ? -1 : 1);
             return;
@@ -325,6 +426,32 @@ class TagListView {
         listEl.addEventListener("pointerdown", (e) => this._onPointerDown(e), { signal: nodeSignal });
 
         document.addEventListener("keydown", (e) => this._onDocumentKeydownCapture(e), { capture: true, signal: nodeSignal });
+
+        listEl.addEventListener(
+            "copy",
+            (e) => {
+                const textToCopy = this._copySelectedText();
+                if (!textToCopy) return;
+                if (e.clipboardData) e.clipboardData.setData("text/plain", textToCopy);
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                e.stopPropagation();
+            },
+            { signal: nodeSignal }
+        );
+
+        listEl.addEventListener(
+            "paste",
+            (e) => {
+                const text = e.clipboardData ? e.clipboardData.getData("text/plain") : "";
+                if (text) this._pasteText(text);
+                else void this._pasteFromClipboard();
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                e.stopPropagation();
+            },
+            { signal: nodeSignal }
+        );
 
         document.addEventListener(
             "pointerup",
@@ -906,35 +1033,25 @@ app.registerExtension({
                 void updateAll();
             };
 
+            const renderTagViews = (preserveCurrentView = null) => {
+                keepView.render(preserveCurrentView === keepView);
+                removeView.render(preserveCurrentView === removeView);
+            };
+
             btnKeep.onclick = () => {
                 const val = keepTagsWidget.inputEl ? keepTagsWidget.inputEl.value : keepTagsWidget.value;
                 if (!val) return;
 
-                const existing = new Set(tagModel.keep.map((t) => t.trim()));
-                val.split(",").forEach((t) => {
-                    const txt = t.trim();
-                    if (txt && !existing.has(txt)) {
-                        tagModel.keep.push(txt);
-                        existing.add(txt);
-                    }
-                });
-                keepView.render(true);
+                tagModel.addTagsTo("keep", val.split(","));
+                renderTagViews(keepView);
             };
 
             btnRemove.onclick = () => {
                 const val = removeTagsWidget.inputEl ? removeTagsWidget.inputEl.value : removeTagsWidget.value;
                 if (!val) return;
 
-                const targets = val.split(",").map((t) => t.trim()).filter((t) => t);
-                targets.forEach((tag) => {
-                    const i = tagModel.keep.indexOf(tag);
-                    if (i >= 0) {
-                        tagModel.keep.splice(i, 1);
-                        tagModel.remove.push(tag);
-                    }
-                });
-                keepView.render(true);
-                removeView.render(true);
+                tagModel.addTagsTo("remove", val.split(","));
+                renderTagViews(removeView);
             };
 
             thumbCanvas.addEventListener(
@@ -947,28 +1064,14 @@ app.registerExtension({
 
             btnRight.onclick = () => {
                 const sel = keepView.getSelectedTagTexts();
-                sel.forEach((t) => {
-                    const i = tagModel.keep.indexOf(t);
-                    if (i >= 0) {
-                        tagModel.keep.splice(i, 1);
-                        tagModel.remove.push(t);
-                    }
-                });
-                keepView.render(false);
-                removeView.render(false);
+                tagModel.moveTagsTo("remove", sel);
+                renderTagViews();
             };
 
             btnLeft.onclick = () => {
                 const sel = removeView.getSelectedTagTexts();
-                sel.forEach((t) => {
-                    const i = tagModel.remove.indexOf(t);
-                    if (i >= 0) {
-                        tagModel.remove.splice(i, 1);
-                        tagModel.keep.push(t);
-                    }
-                });
-                keepView.render(false);
-                removeView.render(false);
+                tagModel.moveTagsTo("keep", sel);
+                renderTagViews();
             };
 
             btnUp.onclick = () => {
