@@ -175,34 +175,145 @@ class TagListView {
         });
     }
 
+    /** @param {KeyboardEvent} e */
+    _shouldHandleKeyboardShortcuts(e) {
+        const t = e.target;
+        if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement) {
+            return false;
+        }
+        if (t && typeof t === "object" && "isContentEditable" in t && /** @type {HTMLElement} */ (t).isContentEditable) {
+            return false;
+        }
+        const { listEl } = this;
+        const otherListFocused = this.model.tagListEls.some(
+            (el) => el !== listEl && el.matches(":focus-within")
+        );
+        if (otherListFocused) return false;
+        const focusedHere = listEl.matches(":focus-within");
+        const lastHere = this.model.lastInteractedListEl === listEl;
+        return focusedHere || lastHere;
+    }
+
+    /** @param {number} delta -1 or +1 */
+    _moveSelectionArrow(delta) {
+        const items = this.getTagItems();
+        if (items.length === 0) return;
+
+        const selectedIndices = items
+            .map((el, i) => (el.classList.contains("selected") ? i : -1))
+            .filter((i) => i >= 0);
+        const lo = selectedIndices.length ? Math.min(...selectedIndices) : -1;
+        const hi = selectedIndices.length ? Math.max(...selectedIndices) : -1;
+
+        let idx;
+        if (delta < 0) {
+            const base = lo >= 0 ? lo : (this.lastSelectedIndex >= 0 ? this.lastSelectedIndex : 0);
+            idx = Math.max(0, base - 1);
+        } else {
+            const base = hi >= 0 ? hi : (this.lastSelectedIndex >= 0 ? this.lastSelectedIndex : 0);
+            idx = Math.min(items.length - 1, base + 1);
+        }
+
+        items.forEach((el) => el.classList.remove("selected"));
+        items[idx].classList.add("selected");
+        this.lastSelectedIndex = idx;
+        items[idx].scrollIntoView({ block: "nearest" });
+    }
+
+    /**
+     * Ctrl+↑: 選択行の上端の上を追加選択
+     * Ctrl+↓: 選択行の下端の下を追加選択
+     * @param {number} delta -1 (Up) or +1 (Down)
+     */
+    _adjustRangeCtrlArrow(delta) {
+        const items = this.getTagItems();
+        const n = items.length;
+        if (n === 0) return;
+
+        const indices = items.map((el, i) => (el.classList.contains("selected") ? i : -1)).filter((i) => i >= 0);
+        let lo;
+        let hi;
+        if (indices.length === 0) {
+            const seed = Math.max(0, Math.min(this.lastSelectedIndex >= 0 ? this.lastSelectedIndex : 0, n - 1));
+            lo = hi = seed;
+        } else {
+            lo = Math.min(...indices);
+            hi = Math.max(...indices);
+        }
+
+        if (delta < 0) {
+            const idx = lo > 0 ? lo - 1 : 0;
+            items[idx].classList.add("selected");
+            this.lastSelectedIndex = idx;
+            items[idx].scrollIntoView({ block: "nearest" });
+            return;
+        }
+        const idx = hi < n - 1 ? hi + 1 : n - 1;
+        items[idx].classList.add("selected");
+        this.lastSelectedIndex = idx;
+        items[idx].scrollIntoView({ block: "nearest" });
+    }
+
+    /** @param {KeyboardEvent} e */
+    _onDocumentKeydownCapture(e) {
+        if (!this._shouldHandleKeyboardShortcuts(e)) return;
+
+        const items = this.getTagItems();
+        if (items.length === 0) return;
+
+        const key = e.key;
+        const lower = key.length === 1 ? key.toLowerCase() : key;
+
+        if ((e.ctrlKey || e.metaKey) && lower === "c") {
+            const selected = this.listEl.querySelectorAll(".train-tag-item.selected");
+            if (selected.length === 0) return;
+            const textToCopy = Array.from(selected)
+                .map((item) => item.text)
+                .join(",");
+            void navigator.clipboard.writeText(textToCopy);
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
+
+        if ((e.ctrlKey || e.metaKey) && lower === "a") {
+            items.forEach((el) => el.classList.add("selected"));
+            this.lastSelectedIndex = items.length - 1;
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
+
+        if ((e.ctrlKey || e.metaKey) && lower === "i") {
+            items.forEach((el) => el.classList.toggle("selected"));
+            const selIdx = items.map((el, i) => (el.classList.contains("selected") ? i : -1)).filter((i) => i >= 0);
+            this.lastSelectedIndex = selIdx.length ? Math.max(...selIdx) : -1;
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
+
+        if (!e.ctrlKey && !e.metaKey && !e.altKey && (key === "ArrowUp" || key === "ArrowDown")) {
+            e.preventDefault();
+            e.stopPropagation();
+            this._moveSelectionArrow(key === "ArrowUp" ? -1 : 1);
+            return;
+        }
+
+        if ((e.ctrlKey || e.metaKey) && !e.altKey && (key === "ArrowUp" || key === "ArrowDown")) {
+            e.preventDefault();
+            e.stopPropagation();
+            this._adjustRangeCtrlArrow(key === "ArrowUp" ? -1 : 1);
+            return;
+        }
+    }
+
     _bindEvents() {
         const { listEl, nodeSignal, enableReorder } = this;
 
         listEl.addEventListener("pointerdown", (e) => this._onPointerDown(e), { signal: nodeSignal });
 
-        // ComfyUI 本体がフォーカスを持つことが多いため、キャプチャで拾い list 内フォーカス時のみ処理
-        document.addEventListener(
-            "keydown",
-            (e) => {
-                if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "c") return;
-                const otherListFocused = this.model.tagListEls.some(
-                    (el) => el !== listEl && el.matches(":focus-within")
-                );
-                if (otherListFocused) return;
-                const focusedHere = listEl.matches(":focus-within");
-                const lastHere = this.model.lastInteractedListEl === listEl;
-                if (!focusedHere && !lastHere) return;
-                const selected = listEl.querySelectorAll(".train-tag-item.selected");
-                if (selected.length === 0) return;
-                const textToCopy = Array.from(selected)
-                    .map((item) => item.text)
-                    .join(",");
-                void navigator.clipboard.writeText(textToCopy);
-                e.preventDefault();
-                e.stopPropagation();
-            },
-            { capture: true, signal: nodeSignal }
-        );
+        document.addEventListener("keydown", (e) => this._onDocumentKeydownCapture(e), { capture: true, signal: nodeSignal });
 
         document.addEventListener(
             "pointerup",
