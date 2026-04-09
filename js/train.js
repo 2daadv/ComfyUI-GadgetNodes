@@ -1,11 +1,556 @@
 import { app } from "/scripts/app.js";
 import { api } from "/scripts/api.js";
 
+/** @param {AbortSignal[]} signals */
+function mergeAbortSignals(signals) {
+    if (typeof AbortSignal !== "undefined" && typeof AbortSignal.any === "function") {
+        return AbortSignal.any(signals);
+    }
+    const c = new AbortController();
+    const stop = () => c.abort();
+    for (const s of signals) {
+        if (s.aborted) {
+            stop();
+            break;
+        }
+        s.addEventListener("abort", stop, { once: true });
+    }
+    return c.signal;
+}
+
+const TrainApi = {
+    getImages(folder) {
+        return api.fetchApi(`/gadget_nodes/train/get_images?folder=${encodeURIComponent(folder)}`).then((r) => r.json());
+    },
+    getData(folder, filename) {
+        return api.fetchApi(
+            `/gadget_nodes/train/get_data?folder=${encodeURIComponent(folder)}&filename=${encodeURIComponent(filename)}`
+        ).then((r) => r.json());
+    },
+    saveTags(folder, filename, tags) {
+        return api.fetchApi("/gadget_nodes/train/save_tags", {
+            method: "POST",
+            body: JSON.stringify({ folder, filename, tags }),
+        });
+    },
+};
+
+function createTagElement(text) {
+    const el = document.createElement("div");
+    el.className = "train-tag-item";
+
+    const handle = document.createElement("div");
+    handle.className = "drag-handle";
+    handle.innerHTML = "⠿";
+
+    const label = document.createElement("span");
+    label.className = "tag-label";
+    label.textContent = text;
+
+    el.appendChild(handle);
+    el.appendChild(label);
+
+    el.text = text;
+    el.draggable = false;
+    return el;
+}
+
+class TagTrainModel {
+    constructor() {
+        this.keep = [];
+        this.remove = [];
+        /** @type {HTMLElement | null} 直近でクリックしたタグ列（フォーカスが本体に取られる場合の Ctrl+C 用） */
+        this.lastInteractedListEl = null;
+        /** @type {HTMLElement[]} keep / remove のリスト要素（どちらにフォーカスがあるか判定用） */
+        this.tagListEls = [];
+    }
+
+    /** @param {HTMLElement} el */
+    registerTagListEl(el) {
+        if (!this.tagListEls.includes(el)) this.tagListEls.push(el);
+    }
+
+    /** @param {string[]} tags @param {string[]} blacklist */
+    loadFromServer(tags, blacklist) {
+        this.keep = [];
+        this.remove = [];
+        const bl = new Set(blacklist);
+        for (const t of tags) {
+            if (bl.has(t)) this.remove.push(t);
+            else this.keep.push(t);
+        }
+    }
+
+    toSaveString() {
+        return this.keep.join(",");
+    }
+}
+
+class TagListView {
+    /**
+     * @param {{ title: string, columnKey: "keep"|"remove", enableReorder: boolean, model: TagTrainModel, signal: AbortSignal }} opts
+     */
+    constructor(opts) {
+        this.model = opts.model;
+        this.columnKey = opts.columnKey;
+        this.enableReorder = opts.enableReorder;
+        this.nodeSignal = opts.signal;
+
+        this.draggedItems = null;
+        /** @type {Element | null} insertBefore の第2引数（null は末尾） */
+        this.dropTargetRef = null;
+
+        this.isSelecting = false;
+        this.dragStartIndex = -1;
+        this.lastSelectedIndex = -1;
+
+        this.box = document.createElement("div");
+        this.box.className = "train-column-box";
+
+        const titleEl = document.createElement("div");
+        titleEl.className = "train-column-title";
+        titleEl.textContent = opts.title;
+        this.box.appendChild(titleEl);
+
+        this.listEl = document.createElement("div");
+        this.listEl.className = "train-list train-list-focusable";
+
+        this.indicator = document.createElement("div");
+        this.indicator.className = "drop-indicator";
+        this.listEl.appendChild(this.indicator);
+
+        this.box.appendChild(this.listEl);
+
+        this.listEl.tabIndex = 0;
+
+        this.model.registerTagListEl(this.listEl);
+
+        this._bindEvents();
+    }
+
+    getTagItems() {
+        return Array.from(this.listEl.querySelectorAll(":scope > .train-tag-item"));
+    }
+
+    getSelectedTagTexts() {
+        return this.getTagItems().filter((el) => el.classList.contains("selected")).map((el) => el.text);
+    }
+
+    getOrderedTagTexts() {
+        return this.getTagItems().map((el) => el.text);
+    }
+
+    /** @param {{ preserveSelection?: boolean }} [options] */
+    render(options = {}) {
+        const preserve = options.preserveSelection !== false;
+        const sel = preserve ? new Set(this.getSelectedTagTexts()) : new Set();
+        this.getTagItems().forEach((el) => el.remove());
+        for (const text of this.model[this.columnKey]) {
+            const el = createTagElement(text);
+            if (sel.has(text)) el.classList.add("selected");
+            this.listEl.appendChild(el);
+        }
+    }
+
+    syncFromDom() {
+        this.model[this.columnKey] = this.getOrderedTagTexts();
+    }
+
+    applyMoveUpOnDom() {
+        const selected = this.getTagItems().filter((el) => el.classList.contains("selected"));
+        selected.forEach((o) => {
+            if (o.previousElementSibling && o.previousElementSibling.classList.contains("train-tag-item")) {
+                this.listEl.insertBefore(o, o.previousElementSibling);
+            }
+        });
+    }
+
+    applyMoveDownOnDom() {
+        const selected = this.getTagItems().filter((el) => el.classList.contains("selected")).reverse();
+        selected.forEach((o) => {
+            const next = o.nextElementSibling;
+            if (next && next.classList.contains("train-tag-item")) {
+                this.listEl.insertBefore(o, next.nextElementSibling);
+            }
+        });
+    }
+
+    _bindEvents() {
+        const { listEl, nodeSignal, enableReorder } = this;
+
+        listEl.addEventListener("pointerdown", (e) => this._onPointerDown(e), { signal: nodeSignal });
+
+        // ComfyUI 本体がフォーカスを持つことが多いため、キャプチャで拾い list 内フォーカス時のみ処理
+        document.addEventListener(
+            "keydown",
+            (e) => {
+                if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "c") return;
+                const otherListFocused = this.model.tagListEls.some(
+                    (el) => el !== listEl && el.matches(":focus-within")
+                );
+                if (otherListFocused) return;
+                const focusedHere = listEl.matches(":focus-within");
+                const lastHere = this.model.lastInteractedListEl === listEl;
+                if (!focusedHere && !lastHere) return;
+                const selected = listEl.querySelectorAll(".train-tag-item.selected");
+                if (selected.length === 0) return;
+                const textToCopy = Array.from(selected)
+                    .map((item) => item.text)
+                    .join(",");
+                void navigator.clipboard.writeText(textToCopy);
+                e.preventDefault();
+                e.stopPropagation();
+            },
+            { capture: true, signal: nodeSignal }
+        );
+
+        document.addEventListener(
+            "pointerup",
+            () => {
+                this.isSelecting = false;
+                this.dragStartIndex = -1;
+                this.getTagItems().forEach((c) => {
+                    c.draggable = false;
+                });
+            },
+            { capture: true, signal: nodeSignal }
+        );
+
+        if (enableReorder) {
+            listEl.addEventListener("dragstart", (e) => this._onDragStart(e), { signal: nodeSignal });
+            listEl.addEventListener("dragover", (e) => this._onDragOver(e), { signal: nodeSignal });
+            listEl.addEventListener("dragleave", (e) => this._onDragLeave(e), { signal: nodeSignal });
+            listEl.addEventListener("dragend", (e) => this._onDragEnd(e), { signal: nodeSignal });
+        }
+    }
+
+    /** @param {PointerEvent} e */
+    _onPointerDown(e) {
+        if (e.button !== 0) return;
+        const target = e.target.closest(".train-tag-item");
+        if (!target || !this.listEl.contains(target)) return;
+
+        try {
+            this.listEl.focus({ preventScroll: true });
+        } catch (_) {
+            /* ignore */
+        }
+        this.model.lastInteractedListEl = this.listEl;
+
+        const items = this.getTagItems();
+        const currentIndex = items.indexOf(target);
+        if (currentIndex < 0) return;
+
+        const isHandle = e.target.classList.contains("drag-handle");
+        if (isHandle && this.enableReorder) {
+            if (!target.classList.contains("selected")) {
+                items.forEach((c) => c.classList.remove("selected"));
+                target.classList.add("selected");
+            }
+            target.draggable = true;
+            // ハンドルでは preventDefault しない（HTML5 DnD のドラッグ開始が止まるため）
+            return;
+        }
+
+        if (e.shiftKey && this.lastSelectedIndex !== -1) {
+            const start = Math.min(this.lastSelectedIndex, currentIndex);
+            const end = Math.max(this.lastSelectedIndex, currentIndex);
+            items.forEach((item, index) => {
+                if (index >= start && index <= end) item.classList.add("selected");
+            });
+            this.lastSelectedIndex = currentIndex;
+            e.preventDefault();
+            return;
+        }
+
+        if (e.ctrlKey || e.metaKey) {
+            target.classList.toggle("selected");
+            this.lastSelectedIndex = currentIndex;
+            return;
+        }
+
+        items.forEach((c) => c.classList.remove("selected"));
+        target.classList.add("selected");
+        this.isSelecting = true;
+        this.dragStartIndex = currentIndex;
+        this.lastSelectedIndex = currentIndex;
+        e.preventDefault();
+
+        const moveAbort = new AbortController();
+        const moveSignal = mergeAbortSignals([this.nodeSignal, moveAbort.signal]);
+
+        const onMove = (ev) => {
+            if (!(ev.buttons & 1)) return;
+            if (!this.isSelecting || this.dragStartIndex < 0) return;
+            const elAt = document.elementFromPoint(ev.clientX, ev.clientY);
+            const t = elAt && elAt.closest && elAt.closest(".train-tag-item");
+            if (!t || !this.listEl.contains(t)) return;
+            const tagItems = this.getTagItems();
+            const cur = tagItems.indexOf(t);
+            if (cur < 0) return;
+            const start = Math.min(this.dragStartIndex, cur);
+            const end = Math.max(this.dragStartIndex, cur);
+            tagItems.forEach((item, index) => {
+                if (index >= start && index <= end) item.classList.add("selected");
+                else if (!ev.ctrlKey && !ev.metaKey) item.classList.remove("selected");
+            });
+        };
+
+        document.addEventListener("pointermove", onMove, { signal: moveSignal });
+        document.addEventListener(
+            "pointerup",
+            () => {
+                moveAbort.abort();
+            },
+            { once: true, signal: this.nodeSignal }
+        );
+        document.addEventListener(
+            "pointercancel",
+            () => {
+                moveAbort.abort();
+            },
+            { once: true, signal: this.nodeSignal }
+        );
+    }
+
+    /** @param {DragEvent} e */
+    _onDragStart(e) {
+        const item = e.target.closest(".train-tag-item");
+        if (!item || !item.draggable) {
+            e.preventDefault();
+            return;
+        }
+        if (e.dataTransfer) {
+            e.dataTransfer.effectAllowed = "move";
+            try {
+                e.dataTransfer.setData("text/plain", item.text || "");
+            } catch (_) {
+                /* ignore */
+            }
+        }
+        this.dropTargetRef = null;
+        this.draggedItems = this.getTagItems().filter((i) => i.classList.contains("selected"));
+        this.draggedItems.forEach((i) => i.classList.add("dragging"));
+    }
+
+    /** @param {DragEvent} e */
+    _onDragOver(e) {
+        e.preventDefault();
+        if (!this.draggedItems) return;
+
+        const targetItem = e.target.closest(".train-tag-item");
+        this.indicator.style.display = "block";
+
+        if (targetItem) {
+            const rect = targetItem.getBoundingClientRect();
+            const isAfter = e.clientY > rect.top + rect.height / 2;
+            this.dropTargetRef = isAfter ? targetItem.nextElementSibling : targetItem;
+            const lineY = isAfter ? targetItem.offsetTop + targetItem.offsetHeight : targetItem.offsetTop;
+            this.indicator.style.top = `${lineY}px`;
+        } else {
+            const tagItems = this.getTagItems();
+            const lastItem = tagItems.length > 0 ? tagItems[tagItems.length - 1] : null;
+            if (lastItem) {
+                this.dropTargetRef = null;
+                this.indicator.style.top = `${lastItem.offsetTop + lastItem.offsetHeight}px`;
+            } else {
+                this.indicator.style.top = "0px";
+            }
+        }
+    }
+
+    /** @param {DragEvent} e */
+    _onDragLeave(e) {
+        if (!this.listEl.contains(e.relatedTarget)) {
+            this.indicator.style.display = "none";
+        }
+    }
+
+    /** @param {DragEvent} e */
+    _onDragEnd(e) {
+        this.indicator.style.display = "none";
+
+        if (this.draggedItems) {
+            const itemsToMove = this.draggedItems;
+            if (!itemsToMove.includes(this.dropTargetRef)) {
+                itemsToMove.forEach((item) => {
+                    this.listEl.insertBefore(item, this.dropTargetRef);
+                });
+            }
+            this.syncFromDom();
+        }
+
+        if (this.draggedItems) {
+            this.draggedItems.forEach((item) => {
+                item.classList.remove("dragging");
+                item.draggable = false;
+            });
+        }
+        this.draggedItems = null;
+        this.dropTargetRef = null;
+    }
+}
+
+/**
+ * @param {{ img?: string, mask?: string }} currentData
+ * @param {AbortSignal} parentSignal
+ */
+function openTrainImagePopup(currentData, parentSignal) {
+    if (!currentData || !currentData.img) return;
+
+    const local = new AbortController();
+    const popupSignal = mergeAbortSignals([parentSignal, local.signal]);
+
+    const overlay = document.createElement("div");
+    overlay.className = "train-popup-overlay";
+
+    const content = document.createElement("div");
+    content.className = "train-popup-content";
+
+    const activeImg = document.createElement("img");
+    activeImg.src = currentData.img;
+    activeImg.className = "train-popup-img";
+
+    let maskImg = null;
+    const syncMaskSize = () => {
+        if (maskImg && activeImg.complete) {
+            maskImg.style.width = `${activeImg.clientWidth}px`;
+            maskImg.style.height = `${activeImg.clientHeight}px`;
+        }
+    };
+
+    if (currentData.mask) {
+        maskImg = document.createElement("img");
+        maskImg.src = currentData.mask;
+        maskImg.className = "train-popup-mask";
+        content.appendChild(maskImg);
+    }
+
+    content.appendChild(activeImg);
+    overlay.appendChild(content);
+    document.body.appendChild(overlay);
+
+    window.addEventListener("resize", syncMaskSize, { signal: popupSignal });
+
+    const close = () => {
+        local.abort();
+        overlay.classList.remove("show");
+        setTimeout(() => overlay.remove(), 200);
+    };
+
+    parentSignal.addEventListener(
+        "abort",
+        () => {
+            if (overlay.parentNode) {
+                local.abort();
+                overlay.classList.remove("show");
+                setTimeout(() => overlay.remove(), 200);
+            }
+        },
+        { once: true }
+    );
+
+    activeImg.onload = () => {
+        syncMaskSize();
+        overlay.classList.add("show");
+    };
+
+    if (activeImg.complete) {
+        syncMaskSize();
+        overlay.classList.add("show");
+    }
+
+    activeImg.onclick = (e) => {
+        e.stopPropagation();
+        if (maskImg) {
+            maskImg.style.display = maskImg.style.display === "none" ? "block" : "none";
+        }
+    };
+
+    overlay.addEventListener("click", close, { signal: popupSignal });
+}
+
 // --- スタイル定義 ---
 if (!document.getElementById("gadget-train-style")) {
-    const style = document.createElement('style');
+    const style = document.createElement("style");
     style.id = "gadget-train-style";
     style.textContent = `
+        .train-main-view {
+            display: flex;
+            height: 100%;
+            color: white;
+            padding: 5px;
+            gap: 10px;
+            font-family: sans-serif;
+            background: #222;
+        }
+        .train-left-pane {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            border: 1px solid #444;
+            overflow: hidden;
+        }
+        .train-thumb-canvas {
+            flex: 1;
+            background: #000;
+            object-fit: contain;
+            width: 100%;
+            min-height: 100px;
+            cursor: zoom-in;
+        }
+        .train-input-slot {
+            height: 50px;
+        }
+        .train-btn-transfer {
+            background: #335;
+            color: #fff;
+            border: none;
+            padding: 6px;
+            cursor: pointer;
+            font-size: 11px;
+        }
+        .train-column-box {
+            width: 180px;
+            min-width: 180px;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            border: 1px solid #444;
+            background: #222;
+        }
+        .train-column-title {
+            font-size: 11px;
+            text-align: center;
+            padding: 4px;
+            background: #333;
+            font-weight: bold;
+        }
+        .train-controls {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            gap: 8px;
+        }
+        .train-ctrl-btn {
+            width: 45px;
+            height: 35px;
+            cursor: pointer;
+            background: #444;
+            color: #fff;
+            border: 1px solid #666;
+        }
+        .train-ctrl-btn-save {
+            background: #282;
+        }
+        .train-list-focusable {
+            outline: none;
+        }
+        .train-widget-input-fill {
+            width: 100%;
+            height: 100%;
+        }
+
         .train-popup-overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0,0,0,0.85); z-index: 10010;
@@ -19,14 +564,14 @@ if (!document.getElementById("gadget-train-style")) {
 
         .train-list {
             position: relative !important;
-            flex: 1;             /* 親要素の空きスペースを埋める */
-            overflow-y: auto;    /* 溢れた場合にスクロールバーを表示 */
-            min-height: 0;       /* Flexbox内で要素が縮小できるようにするために必須 */
+            flex: 1;
+            overflow-y: auto;
+            min-height: 0;
             background: #111;
             border-top: 1px solid #444;
         }
         .train-tag-item {
-            display: flex; align-items: center; padding: 3px 6px; 
+            display: flex; align-items: center; padding: 3px 6px;
             cursor: pointer; border-bottom: 1px solid #222; gap: 6px;
         }
         .train-tag-item:hover { background: #333; }
@@ -43,7 +588,7 @@ if (!document.getElementById("gadget-train-style")) {
             background: #ffaa00;
             pointer-events: none;
             display: none;
-            z-index: 9999; /* 最前面に */
+            z-index: 9999;
             box-shadow: 0 0 5px rgba(255, 170, 0, 0.8);
         }
     `;
@@ -54,449 +599,248 @@ app.registerExtension({
     name: "Gadget.TrainTagsEdit",
     async beforeRegisterNodeDef(nodeType, nodeData) {
         if (nodeData.name !== "Edit Train Tags") return;
-        // タグ要素を生成するヘルパー（Optionの代わり）
-        const createTag = (text, value) => {
-            const el = document.createElement("div");
-            el.className = "train-tag-item";
 
-            const handle = document.createElement("div");
-            handle.className = "drag-handle";
-            handle.innerHTML = "⠿";
-
-            const label = document.createElement("span");
-            label.className = "tag-label";
-            label.textContent = text;
-
-            el.appendChild(handle);
-            el.appendChild(label);
-
-            el.text = text;
-            el.value = value;
-            el.draggable = false;
-            return el;
-        };
-        const clearListTags = (listEl) => {
-            Array.from(listEl.children).forEach(child => {
-                if (child.classList.contains("train-tag-item")) child.remove();
-            });
-        };
-        // --- データ更新用関数 ---
-        const updateAll = async (node, canvas, midList, rightList) => {
-            const folder = node.widgets.find(w => w.name === "folder").value;
-            const imageWidget = node.widgets.find(w => w.name === "image_file_name");
-
-            if (!folder) return;
-
-            const imgResp = await api.fetchApi(`/gadget_nodes/train/get_images?folder=${encodeURIComponent(folder)}`);
-            const imgData = await imgResp.json();
-            imageWidget.options.values = imgData.files;
-
-            if (imgData.files.length > 0 && (!imageWidget.value || !imgData.files.includes(imageWidget.value))) {
-                imageWidget.value = imgData.files[0];
-            }
-            if (!imageWidget.value) return;
-
-            const dataResp = await api.fetchApi(`/gadget_nodes/train/get_data?folder=${encodeURIComponent(folder)}&filename=${encodeURIComponent(imageWidget.value)}`);
-            const data = await dataResp.json();
-
-            // ポップアップ用にデータを保持
-            node._currentData = data;
-
-            // プレビュー描画
-            const ctx = canvas.getContext("2d");
-            const img = new Image();
-            img.onload = () => {
-                canvas.width = img.width; canvas.height = img.height;
-                ctx.drawImage(img, 0, 0);
-                if (data.mask) {
-                    const mask = new Image();
-                    mask.onload = () => { ctx.globalAlpha = 0.2; ctx.drawImage(mask, 0, 0); ctx.globalAlpha = 1.0; };
-                    mask.src = data.mask;
-                }
-            };
-            img.src = data.img;
-
-            clearListTags(midList);
-            clearListTags(rightList);
-            data.tags.forEach((t, i) => {
-                const item = createTag(t, i);
-                if (data.blacklist.includes(t)) rightList.appendChild(item);
-                else midList.appendChild(item);
-            });
+        const prevOnRemoved = nodeType.prototype.onRemoved;
+        nodeType.prototype.onRemoved = function () {
+            this._trainUiAbort?.abort();
+            if (typeof prevOnRemoved === "function") return prevOnRemoved.apply(this, arguments);
         };
 
+        const prevOnNodeCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () {
+            if (typeof prevOnNodeCreated === "function") prevOnNodeCreated.apply(this, arguments);
+
             const node = this;
+            const uiAbort = new AbortController();
+            node._trainUiAbort = uiAbort;
+            const signal = uiAbort.signal;
+
             node.setSize([950, 650]);
 
-            const minW = 540, minH = 300;
-            node.onResize = function(size) {
+            const minW = 540,
+                minH = 300;
+            node.onResize = function (size) {
                 if (size[0] < minW) size[0] = minW;
                 if (size[1] < minH) size[1] = minH;
-                this.size[0] = size[0]; this.size[1] = size[1];
+                this.size[0] = size[0];
+                this.size[1] = size[1];
             };
 
-            // --- UI構築 ---
+            const tagModel = new TagTrainModel();
+
             const mainView = document.createElement("div");
-            mainView.style.cssText = "display: flex; height: 100%; color: white; padding: 5px; gap: 10px; font-family: sans-serif; background: #222;";
+            mainView.className = "train-main-view";
 
             const leftPane = document.createElement("div");
-            leftPane.style.cssText = "flex: 1; display: flex; flex-direction: column; border: 1px solid #444; overflow: hidden;";
+            leftPane.className = "train-left-pane";
 
             const thumbCanvas = document.createElement("canvas");
-            // cursorをzoom-inにしてポップアップ可能であることを示す
-            thumbCanvas.style.cssText = "flex: 1; background: #000; object-fit: contain; width: 100%; min-height: 100px; cursor: zoom-in;";
+            thumbCanvas.className = "train-thumb-canvas";
 
-            const keepTagsContainer = document.createElement("div"); keepTagsContainer.style.height = "50px";
+            const keepTagsContainer = document.createElement("div");
+            keepTagsContainer.className = "train-input-slot";
             const btnKeep = document.createElement("button");
             btnKeep.innerText = ">> Keep";
-            btnKeep.style.cssText = "background: #335; color: #fff; border: none; padding: 6px; cursor: pointer; font-size: 11px;";
+            btnKeep.className = "train-btn-transfer";
 
-            const removeTagsContainer = document.createElement("div"); removeTagsContainer.style.height = "50px";
+            const removeTagsContainer = document.createElement("div");
+            removeTagsContainer.className = "train-input-slot";
             const btnRemove = document.createElement("button");
             btnRemove.innerText = ">> Remove";
-            btnRemove.style.cssText = "background: #335; color: #fff; border: none; padding: 6px; cursor: pointer; font-size: 11px;";
+            btnRemove.className = "train-btn-transfer";
 
             leftPane.append(thumbCanvas, keepTagsContainer, btnKeep, removeTagsContainer, btnRemove);
 
-            const createBox = (title, isKeepList = false) => {
-                const box = document.createElement("div");
-                box.style.cssText = "width: 180px; min-width: 180px; height: 100%; display: flex; flex-direction: column; border: 1px solid #444; background: #222;";
-                box.innerHTML = `<div style='font-size:11px; text-align:center; padding:4px; background:#333; font-weight:bold;'>${title}</div>`;
+            const keepView = new TagListView({
+                title: "keep_tags",
+                columnKey: "keep",
+                enableReorder: true,
+                model: tagModel,
+                signal,
+            });
 
-                const list = document.createElement("div");
-                list.className = "train-list";
-
-                const indicator = document.createElement("div");
-                indicator.className = "drop-indicator";
-                list.appendChild(indicator);
-
-                Object.defineProperty(list, "options", {
-                    get: () => Array.from(list.children).filter(c => c.classList.contains("train-tag-item"))
-                });
-                Object.defineProperty(list, "selectedOptions", {
-                    get: () => list.querySelectorAll(".train-tag-item.selected")
-                });
-                list.add = (el) => { list.appendChild(el); };
-
-                let isSelecting = false;
-                let lastSelectedIndex = -1;
-                let dragStartIndex = -1; // ドラッグ開始位置を保持
-                let dropTargetRef = null;
-
-                list.addEventListener("mousedown", (e) => {
-                    const items = Array.from(list.children);
-                    const target = e.target.closest(".train-tag-item");
-                    if (!target) return;
-
-                    const isHandle = e.target.classList.contains("drag-handle");
-                    const currentIndex = items.indexOf(target);
-
-                    if (isHandle && isKeepList) {
-                        // 並べ替えモード
-                        if (!target.classList.contains("selected")) {
-                            items.forEach(c => c.classList.remove("selected"));
-                            target.classList.add("selected");
-                        }
-                        target.draggable = true;
-                        node._draggedItems = items.filter(item => item.classList.contains("selected"));
-                    } else {
-                        // 範囲選択モード
-                        isSelecting = true;
-                        dragStartIndex = currentIndex; // 開始位置を記録
-                        target.draggable = false;
-
-                        if (e.shiftKey && lastSelectedIndex !== -1) {
-                            const start = Math.min(lastSelectedIndex, currentIndex);
-                            const end = Math.max(lastSelectedIndex, currentIndex);
-                            for (let i = start; i <= end; i++) items[i].classList.add("selected");
-                        } else if (e.ctrlKey || e.metaKey) {
-                            target.classList.toggle("selected");
-                        } else {
-                            // 通常クリック：一旦すべて解除して開始点を手動選択
-                            items.forEach(c => c.classList.remove("selected"));
-                            target.classList.add("selected");
-                        }
-                        lastSelectedIndex = currentIndex;
-                        if (!isHandle) e.preventDefault();
-                    }
-                });
-
-                list.addEventListener("mouseover", (e) => {
-                    if (isSelecting && dragStartIndex !== -1) {
-                        const items = Array.from(list.children);
-                        const target = e.target.closest(".train-tag-item");
-                        if (!target) return;
-
-                        const currentIndex = items.indexOf(target);
-                        const start = Math.min(dragStartIndex, currentIndex);
-                        const end = Math.max(dragStartIndex, currentIndex);
-
-                        // 範囲外の選択を解除し、範囲内を選択する（拡大・縮小に対応）
-                        items.forEach((item, index) => {
-                            if (index >= start && index <= end) {
-                                item.classList.add("selected");
-                            } else {
-                                // Ctrlキーを押していない場合は範囲外を解除
-                                if (!e.ctrlKey && !e.metaKey) {
-                                    item.classList.remove("selected");
-                                }
-                            }
-                        });
-                    }
-                });
-
-                // --- Ctrl+C で選択項目をコピー ---
-                list.addEventListener("keydown", (e) => {
-                    if ((e.ctrlKey || e.metaKey) && e.key === "c") {
-                        const selected = Array.from(list.selectedOptions);
-                        if (selected.length === 0) return;
-                        const textToCopy = selected.map(item => item.textContent.replace("⠿","").trim()).join(",");
-                        navigator.clipboard.writeText(textToCopy);
-                        e.preventDefault(); // ブラウザ標準のコピー挙動を抑制
-                    }
-                });
-
-                // キーボードイベントを受け取るために tabindex が必要
-                list.tabIndex = 0;
-                list.style.outline = "none"; // フォーカス時の枠線を消す
-
-                window.addEventListener("mouseup", () => {
-                    isSelecting = false;
-                    dragStartIndex = -1;
-                    Array.from(list.children).forEach(c => c.draggable = false);
-                }, { capture: true });
-
-                if (isKeepList) {
-                    list.addEventListener("dragover", (e) => {
-                        e.preventDefault();
-                        if (!node._draggedItems) return;
-
-                        const targetItem = e.target.closest(".train-tag-item");
-                        indicator.style.display = "block";
-
-                        if (targetItem) {
-                            const rect = targetItem.getBoundingClientRect();
-                            const isAfter = e.clientY > rect.top + rect.height / 2;
-                            dropTargetRef = isAfter ? targetItem.nextElementSibling : targetItem;
-
-                            // offsetTop を使用して正確な位置を計算
-                            const lineY = isAfter ? targetItem.offsetTop + targetItem.offsetHeight : targetItem.offsetTop;
-                            indicator.style.top = `${lineY}px`;
-                        } else {
-                            // リストの末尾
-                            const lastItem = Array.from(list.children)
-                                .filter(c => c.classList.contains("train-tag-item")).pop();
-                            if (lastItem) {
-                                dropTargetRef = null;
-                                indicator.style.top = `${lastItem.offsetTop + lastItem.offsetHeight}px`;
-                            } else {
-                                indicator.style.top = "0px";
-                            }
-                        }
-                    });
-
-                    list.addEventListener("dragleave", (e) => {
-                        // マウスがリストの外に出た時だけ消す
-                        if (!list.contains(e.relatedTarget)) {
-                            indicator.style.display = "none";
-                        }
-                    });
-
-                    list.addEventListener("dragend", (e) => {
-                        indicator.style.display = "none";
-
-                        // 並べ替え実行 (dropTargetRef が undefined でないことを確認)
-                        if (node._draggedItems && dropTargetRef !== undefined) {
-                            // 自分自身の位置への挿入を回避するチェック
-                            const itemsToMove = node._draggedItems;
-                            if (!itemsToMove.includes(dropTargetRef)) {
-                                itemsToMove.forEach(item => {
-                                    list.insertBefore(item, dropTargetRef);
-                                });
-                            }
-                        }
-
-                        // クリーンアップ
-                        if (node._draggedItems) {
-                            node._draggedItems.forEach(item => item.classList.remove("dragging"));
-                        }
-                        node._draggedItems = null;
-                        dropTargetRef = null;
-                    });
-                }
-
-                box.appendChild(list);
-                return { box, list };
-            };
-
-            const mid = createBox("keep_tags", true);
-            const right = createBox("remove_tags", false);
+            const removeView = new TagListView({
+                title: "remove_tags",
+                columnKey: "remove",
+                enableReorder: false,
+                model: tagModel,
+                signal,
+            });
 
             const controls = document.createElement("div");
-            controls.style.cssText = "display: flex; flex-direction: column; justify-content: center; gap: 8px;";
-            const createBtn = (t) => {
+            controls.className = "train-controls";
+            const createBtn = (t, extraClass = "") => {
                 const b = document.createElement("button");
-                b.innerText = t; b.style.cssText = "width: 45px; height: 35px; cursor: pointer; background: #444; color: #fff; border: 1px solid #666;";
+                b.innerText = t;
+                b.className = "train-ctrl-btn" + (extraClass ? ` ${extraClass}` : "");
                 return b;
             };
-            const btnUp = createBtn("▲"), btnRight = createBtn(">>"), btnLeft = createBtn("<<"), btnDown = createBtn("▼"), btnSave = createBtn("Save");
-            btnSave.style.background = "#282";
+            const btnUp = createBtn("▲"),
+                btnRight = createBtn(">>"),
+                btnLeft = createBtn("<<"),
+                btnDown = createBtn("▼"),
+                btnSave = createBtn("Save", "train-ctrl-btn-save");
             controls.append(btnUp, btnRight, btnLeft, btnDown, btnSave);
 
-            mainView.append(leftPane, mid.box, controls, right.box);
+            mainView.append(leftPane, keepView.box, controls, removeView.box);
             node.addDOMWidget("main_editor_ui", "div", mainView);
 
-            const folderWidget = node.widgets.find(w => w.name === "folder");
-            const imageWidget = node.widgets.find(w => w.name === "image_file_name");
-            const keepTagsWidget = node.widgets.find(w => w.name === "keep_tags");
-            const removeTagsWidget = node.widgets.find(w => w.name === "remove_tags");
+            const folderWidget = node.widgets.find((w) => w.name === "folder");
+            const imageWidget = node.widgets.find((w) => w.name === "image_file_name");
+            const keepTagsWidget = node.widgets.find((w) => w.name === "keep_tags");
+            const removeTagsWidget = node.widgets.find((w) => w.name === "remove_tags");
+
+            const updateAll = async () => {
+                const folder = folderWidget.value;
+                if (!folder) return;
+
+                try {
+                    const imgData = await TrainApi.getImages(folder);
+                    imageWidget.options.values = imgData.files;
+
+                    if (imgData.files.length > 0 && (!imageWidget.value || !imgData.files.includes(imageWidget.value))) {
+                        imageWidget.value = imgData.files[0];
+                    }
+                    if (!imageWidget.value) return;
+
+                    const data = await TrainApi.getData(folder, imageWidget.value);
+                    node._currentData = data;
+
+                    tagModel.loadFromServer(data.tags, data.blacklist);
+                    keepView.render(false);
+                    removeView.render(false);
+
+                    const ctx = thumbCanvas.getContext("2d");
+                    const img = new Image();
+                    img.onload = () => {
+                        thumbCanvas.width = img.width;
+                        thumbCanvas.height = img.height;
+                        ctx.drawImage(img, 0, 0);
+                        if (data.mask) {
+                            const mask = new Image();
+                            mask.onload = () => {
+                                ctx.globalAlpha = 0.2;
+                                ctx.drawImage(mask, 0, 0);
+                                ctx.globalAlpha = 1.0;
+                            };
+                            mask.src = data.mask;
+                        }
+                    };
+                    img.src = data.img;
+                } catch (err) {
+                    console.error("[Gadget.TrainTagsEdit] updateAll failed:", err);
+                }
+            };
 
             setTimeout(() => {
                 if (keepTagsWidget.inputEl) {
-                    keepTagsWidget.inputEl.style.width = keepTagsWidget.inputEl.style.height = "100%";
+                    keepTagsWidget.inputEl.classList.add("train-widget-input-fill");
                     keepTagsWidget.inputEl.placeholder = "Tags to Add";
                     keepTagsContainer.appendChild(keepTagsWidget.inputEl);
                 }
                 if (removeTagsWidget.inputEl) {
-                    removeTagsWidget.inputEl.style.width = removeTagsWidget.inputEl.style.height = "100%";
+                    removeTagsWidget.inputEl.classList.add("train-widget-input-fill");
                     removeTagsWidget.inputEl.placeholder = "Tags to Remove";
                     removeTagsContainer.appendChild(removeTagsWidget.inputEl);
                 }
                 keepTagsWidget.type = removeTagsWidget.type = "hidden";
             }, 100);
 
-            folderWidget.callback = imageWidget.callback = () => updateAll(node, thumbCanvas, mid.list, right.list);
+            folderWidget.callback = imageWidget.callback = () => {
+                void updateAll();
+            };
 
-            // --- タグ操作ロジック ---
             btnKeep.onclick = () => {
-                // inputEl から直接値を読み取る
                 const val = keepTagsWidget.inputEl ? keepTagsWidget.inputEl.value : keepTagsWidget.value;
                 if (!val) return;
 
-                const existing = new Set(Array.from(mid.list.options).map(o => o.text.trim()));
-                val.split(",").forEach(t => {
+                const existing = new Set(tagModel.keep.map((t) => t.trim()));
+                val.split(",").forEach((t) => {
                     const txt = t.trim();
                     if (txt && !existing.has(txt)) {
-                        mid.list.appendChild(createTag(txt, Date.now() + Math.random()));
+                        tagModel.keep.push(txt);
                         existing.add(txt);
                     }
                 });
+                keepView.render(true);
             };
 
-            // Removeボタンの処理：keep_tags(mid)にあればremove_tags(right)へ移動
             btnRemove.onclick = () => {
                 const val = removeTagsWidget.inputEl ? removeTagsWidget.inputEl.value : removeTagsWidget.value;
                 if (!val) return;
 
-                const targets = val.split(",").map(t => t.trim()).filter(t => t);
-                targets.forEach(tag => {
-                    const foundOption = Array.from(mid.list.options).find(o => o.text === tag);
-                    if (foundOption) right.list.appendChild(foundOption);
+                const targets = val.split(",").map((t) => t.trim()).filter((t) => t);
+                targets.forEach((tag) => {
+                    const i = tagModel.keep.indexOf(tag);
+                    if (i >= 0) {
+                        tagModel.keep.splice(i, 1);
+                        tagModel.remove.push(tag);
+                    }
                 });
+                keepView.render(true);
+                removeView.render(true);
             };
 
-            // --- 画像ポップアップロジック ---
-            thumbCanvas.onclick = () => {
-                if (!node._currentData || !node._currentData.img) return;
+            thumbCanvas.addEventListener(
+                "click",
+                () => {
+                    openTrainImagePopup(node._currentData, signal);
+                },
+                { signal }
+            );
 
-                const overlay = document.createElement("div");
-                overlay.className = "train-popup-overlay";
-
-                const content = document.createElement("div");
-                content.className = "train-popup-content";
-
-                const activeImg = document.createElement("img");
-                activeImg.src = node._currentData.img;
-                activeImg.className = "train-popup-img";
-
-                let maskImg = null;
-                const syncMaskSize = () => {
-                    if (maskImg && activeImg.complete) {
-                        maskImg.style.width = `${activeImg.clientWidth}px`;
-                        maskImg.style.height = `${activeImg.clientHeight}px`;
-                    }
-                };
-
-                if (node._currentData.mask) {
-                    maskImg = document.createElement("img");
-                    maskImg.src = node._currentData.mask;
-                    maskImg.className = "train-popup-mask";
-                    content.appendChild(maskImg);
-                }
-
-                content.appendChild(activeImg);
-                overlay.appendChild(content);
-                document.body.appendChild(overlay);
-
-                // --- ここから安定化ロジック ---
-                activeImg.onload = () => {
-                    syncMaskSize();
-                    overlay.classList.add("show");
-                };
-
-                // キャッシュ対策：すでに読み込み完了していれば即座に表示
-                if (activeImg.complete) {
-                    syncMaskSize();
-                    overlay.classList.add("show");
-                }
-
-                const onResize = () => syncMaskSize();
-                window.addEventListener('resize', onResize);
-
-                activeImg.onclick = (e) => {
-                    e.stopPropagation();
-                    if (maskImg) {
-                        // 1回目から確実に "none" と比較されるため、正しく反転
-                        maskImg.style.display = (maskImg.style.display === "none") ? "block" : "none";
-                    }
-                };
-
-                overlay.onclick = () => {
-                    window.removeEventListener('resize', onResize); // 正しい参照で解除
-                    overlay.classList.remove("show");
-                    setTimeout(() => overlay.remove(), 200);
-                };
-            };
             btnRight.onclick = () => {
-                Array.from(mid.list.selectedOptions).forEach(o => {
-                    o.classList.remove("selected");
-                    right.list.appendChild(o);
-                });
-            };
-            btnLeft.onclick = () => {
-                Array.from(right.list.selectedOptions).forEach(o => {
-                    o.classList.remove("selected");
-                    mid.list.appendChild(o);
-                });
-            };
-            btnUp.onclick = () => {
-                Array.from(mid.list.selectedOptions).forEach(o => {
-                    // 前の要素が存在し、かつそれがタグである場合のみ移動
-                    if (o.previousElementSibling && o.previousElementSibling.classList.contains("train-tag-item")) {
-                        mid.list.insertBefore(o, o.previousElementSibling);
+                const sel = keepView.getSelectedTagTexts();
+                sel.forEach((t) => {
+                    const i = tagModel.keep.indexOf(t);
+                    if (i >= 0) {
+                        tagModel.keep.splice(i, 1);
+                        tagModel.remove.push(t);
                     }
                 });
-            };
-            btnDown.onclick = () => {
-                Array.from(mid.list.selectedOptions).reverse().forEach(o => {
-                    const next = o.nextElementSibling;
-                    // 次の要素がタグである場合のみ、その次へ挿入
-                    if (next && next.classList.contains("train-tag-item")) {
-                        mid.list.insertBefore(o, next.nextElementSibling);
-                    }
-                });
-            };
-            btnSave.onclick = async () => {
-                const tags = Array.from(mid.list.options).map(o => o.text).join(",");
-                await api.fetchApi("/gadget_nodes/train/save_tags", {
-                    method: "POST",
-                    body: JSON.stringify({ folder: folderWidget.value, filename: imageWidget.value, tags })
-                });
+                keepView.render(false);
+                removeView.render(false);
             };
 
-            setTimeout(() => updateAll(node, thumbCanvas, mid.list, right.list), 200);
-            node.onConfigure = () => setTimeout(() => updateAll(node, thumbCanvas, mid.list, right.list), 300);
+            btnLeft.onclick = () => {
+                const sel = removeView.getSelectedTagTexts();
+                sel.forEach((t) => {
+                    const i = tagModel.remove.indexOf(t);
+                    if (i >= 0) {
+                        tagModel.remove.splice(i, 1);
+                        tagModel.keep.push(t);
+                    }
+                });
+                keepView.render(false);
+                removeView.render(false);
+            };
+
+            btnUp.onclick = () => {
+                keepView.applyMoveUpOnDom();
+                keepView.syncFromDom();
+            };
+
+            btnDown.onclick = () => {
+                keepView.applyMoveDownOnDom();
+                keepView.syncFromDom();
+            };
+
+            btnSave.onclick = async () => {
+                try {
+                    await TrainApi.saveTags(folderWidget.value, imageWidget.value, tagModel.toSaveString());
+                } catch (err) {
+                    console.error("[Gadget.TrainTagsEdit] save failed:", err);
+                }
+            };
+
+            setTimeout(() => {
+                void updateAll();
+            }, 200);
+            node.onConfigure = () => {
+                setTimeout(() => {
+                    void updateAll();
+                }, 300);
+            };
         };
-    }
+    },
 });
