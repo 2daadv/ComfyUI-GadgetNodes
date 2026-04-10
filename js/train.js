@@ -379,8 +379,9 @@ class TagListView {
 
         const key = e.key;
         const lower = key.length === 1 ? key.toLowerCase() : key;
+        const ctrl = e.ctrlKey || e.metaKey;
 
-        if ((e.ctrlKey || e.metaKey) && lower === "c") {
+        if (ctrl && lower === "c") {
             const textToCopy = this._copySelectedText();
             if (!textToCopy) return;
             void navigator.clipboard.writeText(textToCopy);
@@ -390,7 +391,7 @@ class TagListView {
             return;
         }
 
-        if ((e.ctrlKey || e.metaKey) && lower === "v") {
+        if (ctrl && lower === "v") {
             e.preventDefault();
             e.stopImmediatePropagation();
             e.stopPropagation();
@@ -398,7 +399,7 @@ class TagListView {
             return;
         }
 
-        if ((e.ctrlKey || e.metaKey) && lower === "a") {
+        if (ctrl && lower === "a") {
             items.forEach((el) => el.classList.add("selected"));
             this.lastSelectedIndex = items.length - 1;
             e.preventDefault();
@@ -407,7 +408,7 @@ class TagListView {
             return;
         }
 
-        if ((e.ctrlKey || e.metaKey) && lower === "i") {
+        if (ctrl && lower === "i") {
             items.forEach((el) => el.classList.toggle("selected"));
             const selIdx = items.map((el, i) => (el.classList.contains("selected") ? i : -1)).filter((i) => i >= 0);
             this.lastSelectedIndex = selIdx.length ? Math.max(...selIdx) : -1;
@@ -417,7 +418,7 @@ class TagListView {
             return;
         }
 
-        if (!e.ctrlKey && !e.metaKey && !e.altKey && (key === "ArrowUp" || key === "ArrowDown")) {
+        if (!ctrl && !e.altKey && (key === "ArrowUp" || key === "ArrowDown")) {
             e.preventDefault();
             e.stopImmediatePropagation();
             e.stopPropagation();
@@ -425,7 +426,7 @@ class TagListView {
             return;
         }
 
-        if ((e.ctrlKey || e.metaKey) && !e.altKey && (key === "ArrowUp" || key === "ArrowDown")) {
+        if (ctrl && !e.altKey && (key === "ArrowUp" || key === "ArrowDown")) {
             e.preventDefault();
             e.stopImmediatePropagation();
             e.stopPropagation();
@@ -850,7 +851,6 @@ if (!document.getElementById("gadget-train-style")) {
             width: 100%;
             height: 100%;
         }
-
         .train-popup-overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0,0,0,0.85); z-index: 10010;
