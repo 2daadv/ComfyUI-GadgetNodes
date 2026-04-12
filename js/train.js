@@ -788,25 +788,31 @@ if (!document.getElementById("gadget-train-style")) {
             flex-direction: column;
             border: 1px solid #444;
             overflow: hidden;
+            background: #222;
         }
         .train-thumb-canvas {
-            flex: 1;
+            flex: none; /* 画像サイズに基づき高さを確保 */
             background: #000;
-            object-fit: contain;
             width: 100%;
-            min-height: 100px;
+            display: block;
             cursor: zoom-in;
         }
         .train-input-slot {
-            height: 50px;
+            flex: 1; /* 余ったスペースをテキストエリアに割り当てる */
+            min-height: 50px;
+            margin: 2px 0;
+            display: flex;
+            flex-direction: column;
         }
         .train-btn-transfer {
+            flex: none; /* ボタンは高さを固定 */
             background: #335;
             color: #fff;
             border: none;
             padding: 6px;
             cursor: pointer;
             font-size: 11px;
+            margin-bottom: 8px;
         }
         .train-column-box {
             width: 200px;
@@ -849,7 +855,9 @@ if (!document.getElementById("gadget-train-style")) {
         }
         .train-widget-input-fill {
             width: 100%;
-            height: 100%;
+            height: 100%; /* 親の .train-input-slot 全体に広げる */
+            box-sizing: border-box;
+            resize: none;
         }
         .train-popup-overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
@@ -1022,14 +1030,15 @@ app.registerExtension({
                     const ctx = thumbCanvas.getContext("2d");
                     const img = new Image();
                     img.onload = () => {
-                        thumbCanvas.width = img.width;
-                        thumbCanvas.height = img.height;
-                        ctx.drawImage(img, 0, 0);
+                        const aspect = img.height / img.width;
+                        thumbCanvas.width = 1024; // 内部解像度は一定に保つ
+                        thumbCanvas.height = 1024 * aspect;
+                        ctx.drawImage(img, 0, 0, thumbCanvas.width, thumbCanvas.height);
                         if (data.mask) {
                             const mask = new Image();
                             mask.onload = () => {
                                 ctx.globalAlpha = 0.2;
-                                ctx.drawImage(mask, 0, 0);
+                                ctx.drawImage(mask, 0, 0, thumbCanvas.width, thumbCanvas.height);
                                 ctx.globalAlpha = 1.0;
                             };
                             mask.src = data.mask;
