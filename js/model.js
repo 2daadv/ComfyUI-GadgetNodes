@@ -179,13 +179,10 @@ app.registerExtension({
                 // --- Saveボタンの追加 ---
                 node.addWidget("button", "Save", null, () => {
                     const loraName = node.widgets.find(w => w.name === "lora_name")?.value;
-                    
+
                     if (!loraName) return;
 
-                    // 確認ダイアログの表示 (lora_nameのみ表示)
-                    if (confirm(`Are you sure to save:\n${loraName.replace(/\.(safetensors|ckpt)$/i, ".json")}`)) {
-                        saveLoraInfo(node);
-                    }
+                    saveLoraInfo(node);
                 });
 
                 // --- 保存処理の実行関数 ---
@@ -394,13 +391,10 @@ app.registerExtension({
                 // --- Saveボタンの追加 ---
                 node.addWidget("button", "Save", null, () => {
                     const ckptName = node.widgets.find(w => w.name === "ckpt_name")?.value;
-                    
+
                     if (!ckptName) return;
 
-                    // 確認ダイアログの表示 (lora_nameのみ表示)
-                    if (confirm(`Are you sure to save:\n${ckptName.replace(/\.(safetensors|ckpt)$/i, ".json")}`)) {
-                        saveCheckPointInfo(node);
-                    }
+                    saveCheckPointInfo(node);
                 });
 
                 // --- 保存処理の実行関数 ---

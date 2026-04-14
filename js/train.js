@@ -790,11 +790,20 @@ if (!document.getElementById("gadget-train-style")) {
             overflow: hidden;
             background: #222;
         }
-        .train-thumb-canvas {
-            flex: none; /* 画像サイズに基づき高さを確保 */
-            background: #000;
+        .train-thumb-container {
+            flex: 10; /* 他の要素より圧倒的に大きく広がるように設定 */
+            flex-shrink: 1; /* スペースが足りない時は縮むことを許可 */
+            min-height: 0; /* これがないと画像サイズ以下に縮まない */
             width: 100%;
-            display: block;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: #000;
+        }
+        .train-thumb-canvas {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain; /* アスペクト比を維持して枠内に収める */
             cursor: zoom-in;
         }
         .train-input-slot {
@@ -948,8 +957,11 @@ app.registerExtension({
             const leftPane = document.createElement("div");
             leftPane.className = "train-left-pane";
 
+            const thumbContainer = document.createElement("div");
+            thumbContainer.className = "train-thumb-container";
             const thumbCanvas = document.createElement("canvas");
             thumbCanvas.className = "train-thumb-canvas";
+            thumbContainer.appendChild(thumbCanvas);
 
             const keepTagsContainer = document.createElement("div");
             keepTagsContainer.className = "train-input-slot";
@@ -963,7 +975,7 @@ app.registerExtension({
             btnRemove.innerText = ">> Remove";
             btnRemove.className = "train-btn-transfer";
 
-            leftPane.append(thumbCanvas, keepTagsContainer, btnKeep, removeTagsContainer, btnRemove);
+            leftPane.append(thumbContainer, keepTagsContainer, btnKeep, removeTagsContainer, btnRemove);
 
             const keepView = new TagListView({
                 title: "keep_tags",
