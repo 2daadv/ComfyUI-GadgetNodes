@@ -73,7 +73,7 @@ class PromptToFileNameNode:
         if prompt:
             result ="%date%-%seed%-%model%-"
             result = result + re.sub(r'[\\/:*?"<>|\n\r\t]', "_", prompt, flags=re.MULTILINE)
-            result = result[:80]
+            result = result[:160]
             result = re.sub("\\.+$", "_", result)
             return (result,)
         return ("%date%-%seed%-%model%-ComfyUI",)

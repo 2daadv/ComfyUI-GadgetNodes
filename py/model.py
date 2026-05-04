@@ -128,7 +128,7 @@ async def get_lora_info(request):
         except: pass
 
     thumb_data = None
-    for ext in [".preview.jpeg", ".preview.jpg", ".preview.png", ".jpeg", ".png", ".jpg", ".webp"]:
+    for ext in [".preview.jpeg", ".preview.jpg", ".preview.png", ".preview.webp", ".jpeg", ".png", ".jpg", ".webp"]:
         img_path = base_path + ext
         if os.path.exists(img_path):
             mimetype = get_image_mimetype(img_path)
@@ -214,7 +214,7 @@ async def get_ckpt_info(request):
         except: pass
 
     thumb_data = None
-    for ext in [".preview.jpeg", ".preview.jpg", ".preview.png", ".jpeg", ".png", ".jpg", ".webp"]:
+    for ext in [".preview.jpeg", ".preview.jpg", ".preview.png", ".preview.webp", ".jpeg", ".png", ".jpg", ".webp"]:
         img_path = base_path + ext
         if os.path.exists(img_path):
             mimetype = get_image_mimetype(img_path)
