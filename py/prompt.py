@@ -24,7 +24,10 @@ class NormalizePromptNode:
 
     def run(self, raw_prompt:str):
         if raw_prompt:
-            prompt = re.sub(r"#.*$", "", raw_prompt, flags=re.MULTILINE)
+            prompt = re.sub(r"/\*.*?\*/", "", raw_prompt, flags=re.DOTALL)
+            prompt = re.sub(r"<!--.*?-->", "", prompt, flags=re.DOTALL)
+            prompt = re.sub(r"#.*$", "", prompt, flags=re.MULTILINE)
+
             prompt = re.sub(r"(^ +| +$)", "", prompt, flags=re.MULTILINE)
             prompt = re.sub(r"\n\n+", "", prompt)
             prompt = re.sub(r"( *,+\s*)+", ",", prompt)
