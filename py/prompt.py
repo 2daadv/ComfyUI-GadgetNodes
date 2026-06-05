@@ -32,6 +32,7 @@ class NormalizePromptNode:
             prompt = re.sub(r"\n\n+", "", prompt)
             prompt = re.sub(r"( *,+\s*)+", ",", prompt)
             prompt = re.sub(r"(^,+|,+$)", "", prompt)
+            prompt = translate_bracketed_text(prompt)
             return (prompt,)
         return (raw_prompt,)
 
@@ -80,7 +81,6 @@ class PromptToFileNameNode:
             result = re.sub("\\.+$", "_", result)
             return (result,)
         return ("%date%-%seed%-%model%-ComfyUI",)
-
 
 #=============================================================================
 class PromptPaletteNode:
@@ -134,3 +134,4 @@ async def open_editor(request):
         return web.json_response({"status": "ok"})
     logger.warning(f"[GadgetNodes] Can't open '{file_path}'.")
     return web.json_response({"status": "error"}, status=404)
+

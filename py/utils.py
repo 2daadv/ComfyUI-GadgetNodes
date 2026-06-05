@@ -1,5 +1,7 @@
-import base64
+import base64,json,re
 import numpy as np
+from urllib.parse import quote
+from urllib.request import Request, urlopen
 from io import BytesIO
 from PIL import Image
 from pathlib import Path
@@ -102,3 +104,20 @@ def unpack_list(any_list):
     # ただし、これが「画像処理のパラメータ」なら [0] で良いですが、
     # 「複数の画像を処理する」ノードなら、リストのまま扱うべき局面もあります。
     return any_list[0] if len(any_list) > 0 else any_list
+
+
+TRANSLATE_URL = "https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl=en&q="
+
+def translate_to_english(text: str) -> str:
+    url = TRANSLATE_URL + quote(text)
+    try:
+        with urlopen(Request(url, headers={"User-Agent": "Mozilla/5.0"}), timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+            if isinstance(data, list) and data and isinstance(data[0], list) and data[0]:
+                return data[0][0]
+    except Exception as e:
+        logger.warning(f"[GadgetNodes] Translation failed for '{text}': {e}")
+    return text
+
+def translate_bracketed_text(prompt: str) -> str:
+    return re.sub(r"「([^」]*)」", lambda m: translate_to_english(m.group(1)), prompt)
