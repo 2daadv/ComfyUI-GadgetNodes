@@ -51,7 +51,7 @@ app.registerExtension({
                                 updateValue("steps", preset.steps_total || preset.steps);
                                 updateValue("cfg", preset.cfg);
                                 updateValue("sampler_name", preset.sampler_name);
-                                updateValue("scheduler_name", preset.scheduler_name);
+                                updateValue("scheduler", preset.scheduler);
                                 updateValue("positive", preset.positive);
                                 updateValue("negative", preset.negative);
                                 updateValue("preset_name", preset.preset_name);

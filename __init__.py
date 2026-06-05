@@ -25,6 +25,7 @@ NODE_CLASS_MAPPINGS = {
     "1024": Int1024Node,
     "Select Nth Items Of AnyList": SelectNthItemsOfAnyListNode,
     "Load Checkpoint Preset": CheckpointPresetLoaderNode,
+    "Load Checkpoint or Diffusion Model": LoadCheckpointOrDiffusionModelNode,
     "Edit SD Lora Information": SDLoraInfoEditorNode,
     "Edit SD Checkpoint Information": SDCheckpointInfoEditorNode,
     "Prompt Palette": PromptPaletteNode,

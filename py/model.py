@@ -2,6 +2,8 @@ from __future__ import annotations
 import re,json,os,yaml
 import folder_paths
 import comfy.samplers
+import comfy.sd
+import comfy.utils
 from aiohttp import web
 from server import PromptServer
 from nodes import MAX_RESOLUTION
@@ -81,6 +83,71 @@ async def get_ckpt_preset_api(request):
         if preset:
             return web.json_response(preset)
     return web.json_response({"error": "preset not found"}, status=404)
+
+#=============================================================================
+class LoadCheckpointOrDiffusionModelNode:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "model_name": (folder_paths.get_filename_list("checkpoints") + folder_paths.get_filename_list("diffusion_models"),),
+                "vae_name": (["None"] + folder_paths.get_filename_list("vae"),),
+                "clip_skip": ("INT", {"default": -2, "min": -9, "max": 0, "step": 1}),
+                "is_anima": ("BOOLEAN", {"default": False}),
+            },
+            "optional": {
+                "clip_name": (folder_paths.get_filename_list("text_encoders"),),
+            },
+        }
+    RETURN_TYPES = ("MODEL", "CLIP", "VAE")
+    RETURN_NAMES = ("model", "clip", "vae")
+    FUNCTION = "run"
+    CATEGORY = CATEGORY_MODEL
+
+    @classmethod
+    def VALIDATE_INPUTS(cls, is_anima, vae_name, clip_name=None, **kwargs):
+        if is_anima:
+            if not clip_name:
+                return "Anima (Diffusion Model) requires clip_name."
+            if vae_name == "None":
+                return "Anima (Diffusion Model) requires an external VAE. Please select a VAE instead of 'None'."
+        return True
+
+    def run(self, model_name, vae_name, clip_skip, is_anima, clip_name=None):
+        embedding_directory = folder_paths.get_folder_paths("embeddings")
+        baked_vae = None
+
+        if is_anima:
+            model_path = folder_paths.get_full_path_or_raise("diffusion_models", model_name)
+            model = comfy.sd.load_diffusion_model(model_path)
+            clip_path = folder_paths.get_full_path_or_raise("text_encoders", clip_name)
+            clip = comfy.sd.load_clip(
+                ckpt_paths=[clip_path],
+                embedding_directory=embedding_directory,
+            )
+        else:
+            ckpt_path = folder_paths.get_full_path_or_raise("checkpoints", model_name)
+            model, clip, baked_vae, _ = comfy.sd.load_checkpoint_guess_config(
+                ckpt_path,
+                output_vae=True,
+                output_clip=True,
+                embedding_directory=embedding_directory,
+            )
+
+        if clip is not None and clip_skip < 0:
+            clip = clip.clone()
+            clip.clip_layer(clip_skip)
+
+        if vae_name == "None":
+            vae = baked_vae
+        else:
+            vae_path = folder_paths.get_full_path_or_raise("vae", vae_name)
+            sd, metadata = comfy.utils.load_torch_file(vae_path, return_metadata=True)
+            vae = comfy.sd.VAE(sd=sd, metadata=metadata)
+            vae.throw_exception_if_invalid()
+            vae.patcher.cached_patcher_init = (comfy.sd.load_vae_patcher, (vae_path, metadata, None))
+
+        return (model, clip, vae)
 
 #=============================================================================
 class SDLoraInfoEditorNode:
