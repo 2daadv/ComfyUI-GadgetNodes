@@ -1,5 +1,6 @@
 import base64,json,re
 import numpy as np
+from functools import lru_cache
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 from io import BytesIO
@@ -108,13 +109,16 @@ def unpack_list(any_list):
 
 TRANSLATE_URL = "https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl=en&q="
 
+@lru_cache(maxsize=100)
 def translate_to_english(text: str) -> str:
     url = TRANSLATE_URL + quote(text)
     try:
         with urlopen(Request(url, headers={"User-Agent": "Mozilla/5.0"}), timeout=10) as resp:
             data = json.loads(resp.read().decode())
             if isinstance(data, list) and data and isinstance(data[0], list) and data[0]:
-                return data[0][0]
+                en = data[0][0]
+                logger.info(f"[GadgetNodes] '{text}' was translated as '{en}'")
+                return en
     except Exception as e:
         logger.warning(f"[GadgetNodes] Translation failed for '{text}': {e}")
     return text
