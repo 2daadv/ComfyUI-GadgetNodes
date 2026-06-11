@@ -156,3 +156,22 @@ class SelectNthItemsOfAnyListNode:
                 if -list_len <= i < list_len:
                     results.append(flatten_list[i])
         return (results,)
+
+
+class GroupControlerNode:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "optional": {
+                "group_name": ("STRING", {"default": ""}),
+                "expand": ("BOOLEAN", {"default": True}),
+                "visible": ("BOOLEAN", {"default": True}),
+            },
+        }
+    RETURN_TYPES = ()
+    FUNCTION = "run"
+    OUTPUT_NODE = False
+    CATEGORY = CATEGORY_LOGIC
+
+    def run(self, **kwargs):
+        return ()

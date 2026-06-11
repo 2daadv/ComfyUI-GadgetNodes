@@ -47,7 +47,7 @@ class ManualCropImagesNode:
     CATEGORY = CATEGORY_IMAGE
 
     @classmethod
-    def IS_CHANGED(s, **kwargs):
+    def IS_CHANGED(self, **kwargs):
         return float("NaN")
 
     def crop(self, images, aspect_ratio, unique_id):
