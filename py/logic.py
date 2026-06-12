@@ -158,20 +158,26 @@ class SelectNthItemsOfAnyListNode:
         return (results,)
 
 
-class GroupControlerNode:
+class VirtualGroupNode:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(cls):
         return {
-            "optional": {
-                "group_name": ("STRING", {"default": ""}),
+            "required": {
                 "expand": ("BOOLEAN", {"default": True}),
-                "visible": ("BOOLEAN", {"default": True}),
             },
+            "optional": {
+                "node_ids": ("STRING", {"default": ""}),
+                "node_names": ("STRING", {"default": ""}),
+            },
+            "hidden": {
+                "prompt": "PROMPT",
+                "extra_pnginfo": "EXTRA_PNGINFO"
+            }
         }
+
     RETURN_TYPES = ()
-    FUNCTION = "run"
-    OUTPUT_NODE = False
+    FUNCTION = "noop"
     CATEGORY = CATEGORY_LOGIC
 
-    def run(self, **kwargs):
+    def noop(self, **kwargs):
         return ()
