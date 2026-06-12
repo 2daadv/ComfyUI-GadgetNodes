@@ -26,8 +26,6 @@ app.registerExtension({
 
         nodeType.prototype._applyVirtualGroupLogic = function (isExpanded) {
             if (!this.graph) return;
-            const canvas = this.graph.canvas;
-            if (!this._processedIds) this._processedIds = new Set();
 
             const nodeIds = parseIdRange(this.widgets?.find(w => w.name === "node_ids")?.value || "");
             const nodeNames = this.widgets?.find(w => w.name === "node_names")?.value.split(",").map(s => s.trim()) || [];
@@ -42,62 +40,54 @@ app.registerExtension({
             if (targets.length === 0) return;
 
             if (!isExpanded) {
+                // 保存：現在の位置とサイズを記録
                 let baseNode = targets.reduce((prev, curr) => (curr.pos[1] < prev.pos[1] || (curr.pos[1] === prev.pos[1] && curr.pos[0] < prev.pos[0])) ? curr : prev);
                 this.properties.vg_baseId = baseNode.id;
                 this.properties.vg_states = {};
 
-                targets.forEach((node, idx) => {
-                    this._processedIds.add(node.id);
+                targets.forEach((node) => {
                     this.properties.vg_states[node.id] = {
-                        relX: node.pos[0] - baseNode.pos[0],
-                        relY: node.pos[1] - baseNode.pos[1],
-                        size: [...node.size],
+                        absX: node.pos[0],
+                        absY: node.pos[1],
+                        width: node.size[0],
+                        height: node.size[1],
                         wasCollapsed: !!node.flags?.collapsed
                     };
                     
                     node.flags.collapsed = true;
                     node.size = [200, 30];
-                    node.pos[0] = baseNode.pos[0] + (idx * 15);
-                    node.pos[1] = baseNode.pos[1] + (idx * 15);
+                    // 🌟 階段状オフセットを削除し、基準ノードに完全に重ねる
+                    node.pos[0] = baseNode.pos[0];
+                    node.pos[1] = baseNode.pos[1];
                 });
             } else {
+                // 復元：基準ノードの移動量を反映して完全復元
                 let baseNode = this.graph.getNodeById(this.properties.vg_baseId);
-                
-                // 🌟 修正：基準ノード不在時の自己修復ロジック
+                const oldBase = this.properties.vg_states[this.properties.vg_baseId];
+
+                // 基準が見つからない場合、現在地が最も左上のノードを基準にする
                 if (!baseNode) {
-                    const existingStates = Object.entries(this.properties.vg_states).filter(([id]) => this.graph.getNodeById(Number(id)));
-                    if (existingStates.length > 0) {
-                        // 生き残っているノードの中で、記録されていた相対座標の合計値が最も小さい（左上）ものを特定
-                        const nextBase = existingStates.reduce((prev, curr) => {
-                            const [prevId, pState] = prev;
-                            const [currId, cState] = curr;
-                            return (cState.relY < pState.relY || (cState.relY === pState.relY && cState.relX < pState.relX)) ? curr : prev;
-                        });
-                        baseNode = this.graph.getNodeById(Number(nextBase[0]));
+                    const candidates = Object.entries(this.properties.vg_states).filter(([id]) => this.graph.getNodeById(Number(id)));
+                    if (candidates.length > 0) {
+                        baseNode = candidates.map(c => this.graph.getNodeById(Number(c[0])))
+                            .reduce((prev, curr) => (curr.pos[1] < prev.pos[1] || (curr.pos[1] === prev.pos[1] && curr.pos[0] < prev.pos[0])) ? curr : prev);
                     }
                 }
+
+                const deltaX = baseNode && oldBase ? baseNode.pos[0] - oldBase.absX : 0;
+                const deltaY = baseNode && oldBase ? baseNode.pos[1] - oldBase.absY : 0;
 
                 Object.entries(this.properties.vg_states).forEach(([id, state]) => {
                     const node = this.graph.getNodeById(Number(id));
                     if (!node) return;
                     
-                    if (baseNode) {
-                        // 基準ノードがある場合、オフセットを調整して再配置
-                        const currentRelX = state.relX;
-                        const currentRelY = state.relY;
-                        
-                        // 基準ノードが代わった場合、基準ノード自身の相対オフセットを0に補正する処理
-                        const baseOffset = baseNode.id === Number(id) ? 0 : 0; 
-                        
-                        node.pos[0] = baseNode.pos[0] + (state.relX - (baseNode.id === Number(id) ? state.relX : 0));
-                        node.pos[1] = baseNode.pos[1] + (state.relY - (baseNode.id === Number(id) ? state.relY : 0));
-                    }
-                    node.size = state.size;
+                    node.pos[0] = state.absX + deltaX;
+                    node.pos[1] = state.absY + deltaY;
+                    node.size = [state.width, state.height];
                     node.flags.collapsed = state.wasCollapsed;
                 });
                 
                 this.properties.vg_states = {};
-                this._processedIds.clear();
             }
             this.graph.setDirtyCanvas(true, true);
         };
