@@ -24,15 +24,20 @@ class NormalizePromptNode:
 
     def run(self, raw_prompt:str):
         if raw_prompt:
+            # コメントアウトを除去
             prompt = re.sub(r"/\*.*?\*/", "", raw_prompt, flags=re.DOTALL)
             prompt = re.sub(r"<!--.*?-->", "", prompt, flags=re.DOTALL)
             prompt = re.sub(r"#.*$", "", prompt, flags=re.MULTILINE)
 
+            #各行の先頭・末尾の空白除去
             prompt = re.sub(r"(^ +| +$)", "", prompt, flags=re.MULTILINE)
-            prompt = re.sub(r"\n\n+", "", prompt)
-            prompt = re.sub(r"( *,+\s*)+", ",", prompt)
-            prompt = re.sub(r"(^,+|,+$)", "", prompt)
-            prompt = translate_bracketed_text(prompt)
+            #改行を消して1行に連結
+            prompt = re.sub(r"\n\n+", " ", prompt)
+            #連続するカンマや、前後に空白のあるカンマをカンマ+空白にする
+            prompt = re.sub(r"( *,+\s*)+", ", ", prompt)
+            #先頭・末尾の余分なカンマを除去
+            prompt = re.sub(r"(^, |, $)", "", prompt)
+            prompt = translate_bracketed_text(prompt).strip()
             return (prompt,)
         return (raw_prompt,)
 
@@ -75,7 +80,8 @@ class PromptToFileNameNode:
 
     def run(self, prompt:str):
         if prompt:
-            result = re.sub(r'[\\/:*?"<>|\n\r\t]', "_", prompt, flags=re.MULTILINE)
+            result = prompt.replace(", ", ",")
+            result = re.sub(r'[\\/:*?"<>|\n\r\t]', "_", result, flags=re.MULTILINE)
             result = result[:200]
             result = re.sub("\\.+$", "_", result)
             return (result,)

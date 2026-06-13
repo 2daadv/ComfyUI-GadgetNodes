@@ -24,6 +24,14 @@ app.registerExtension({
             this._applyVirtualGroupLogic(value);
         };
 
+        // ノード削除時にグループが展開中か判定し、必要なら展開してから削除
+        nodeType.prototype.onRemoved = function () {
+            const expandWidget = this.widgets?.find(w => w.name === "expand");
+            if (expandWidget && expandWidget.value === false) {
+                this._applyVirtualGroupLogic(true);
+            }
+        };
+
         nodeType.prototype._applyVirtualGroupLogic = function (isExpanded) {
             if (!this.graph) return;
 
