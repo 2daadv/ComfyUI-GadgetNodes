@@ -7,7 +7,7 @@ from .py.train import *
 
 NODE_CLASS_MAPPINGS = {
     "Normalize Prompt": NormalizePromptNode,
-    "Check NSFW Prompt": CheckNsfwPromptNode,
+    "Analyze Prompt": AnalyzePromptNode,
     "Prompt To FileName": PromptToFileNameNode,
     "Any Pass": AnyPassNode,
     "+1": IncrementNode,

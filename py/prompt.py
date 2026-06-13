@@ -42,7 +42,7 @@ class NormalizePromptNode:
         return (raw_prompt,)
 
 
-class CheckNsfwPromptNode:
+class AnalyzePromptNode:
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -50,19 +50,24 @@ class CheckNsfwPromptNode:
                 "prompt": ("STRING", {"forceInput": True})
             }
         }
-    RETURN_TYPES = ("BOOLEAN",)
-    RETURN_NAMES = ("is_nsfw",)
+    RETURN_TYPES = ("STRING","BOOLEAN",)
+    RETURN_NAMES = ("prompt","facedetailer_enabled",)
     FUNCTION = "run"
     OUTPUT_NODE = False
     CATEGORY = CATEGORY_PROMPT
 
     def run(self, prompt:str):
+        facedetailer_enabled = False
         if prompt:
-            return (
-                re.search(r"irrumatio|deepthroat|cunnilingus|anilingus|nipple|completely nude", prompt) or
-                re.search(r", *(sex|pussy|anus|penis|pee|[^,]+job)| (sex|pussy|anus|penis) *,", prompt),
-            )
-        return (False,)
+            facedetailer_enabled = "☹" in prompt
+            if facedetailer_enabled:
+                prompt = prompt.replace("☹", "")
+            if has_any_words(prompt, ("nipples?", "pussy", "anus", "penis", "nude", "irrumatio", "deepthroat", "sex")):
+                if not has_word(prompt, "explicit"):
+                    prompt = prompt + ", explicit"
+                if not has_word(prompt, "uncensored"):
+                    prompt = prompt + ", uncensored"
+        return (prompt, facedetailer_enabled,)
 
 class PromptToFileNameNode:
     @classmethod

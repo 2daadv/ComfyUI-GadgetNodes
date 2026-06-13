@@ -125,3 +125,11 @@ def translate_to_english(text: str) -> str:
 
 def translate_bracketed_text(prompt: str) -> str:
     return re.sub(r"「([^」]*)」", lambda m: translate_to_english(m.group(1)), prompt)
+
+def has_word(prompt:str, word: str) -> bool:
+    pattern = rf"(^|,\s*){word}($|\s*,)"
+    return bool(re.search(pattern, prompt))
+
+def has_any_words(prompt: str, words: tuple[str, ...]) -> bool:
+    pattern = rf"(^|,\s*)({'|'.join(words)})($|\s*,)"
+    return bool(re.search(pattern, prompt))
