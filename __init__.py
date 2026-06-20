@@ -8,6 +8,7 @@ from .py.train import *
 NODE_CLASS_MAPPINGS = {
     "Normalize Prompt": NormalizePromptNode,
     "Analyze Prompt": AnalyzePromptNode,
+    "Split Prompt": SplitPromptNode,
     "Prompt To FileName": PromptToFileNameNode,
     "Any Pass": AnyPassNode,
     "+1": IncrementNode,

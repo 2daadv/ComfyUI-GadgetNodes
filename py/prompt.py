@@ -50,8 +50,8 @@ class AnalyzePromptNode:
                 "prompt": ("STRING", {"forceInput": True})
             }
         }
-    RETURN_TYPES = ("STRING","BOOLEAN",)
-    RETURN_NAMES = ("prompt","facedetailer_enabled",)
+    RETURN_TYPES = ("STRING", "BOOLEAN",)
+    RETURN_NAMES = ("prompt", "facedetailer_enabled",)
     FUNCTION = "run"
     OUTPUT_NODE = False
     CATEGORY = CATEGORY_PROMPT
@@ -62,12 +62,51 @@ class AnalyzePromptNode:
             facedetailer_enabled = "☹" in prompt
             if facedetailer_enabled:
                 prompt = prompt.replace("☹", "")
-            if has_any_words(prompt, ("nipples?", "pussy", "anus", "penis", "nude", "irrumatio", "deepthroat", "sex")):
+            if has_any_words(prompt, ("(nude|nipples?|pussy|anus|penis)", "(fellatio|irrumatio|deepthroat)", "(foot|hand|blow)job", "(sex|masturbation)")):
                 if not has_word(prompt, "explicit"):
                     prompt = prompt + ", explicit"
                 if not has_word(prompt, "uncensored"):
                     prompt = prompt + ", uncensored"
         return (prompt, facedetailer_enabled,)
+
+class SplitPromptNode:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "prompt": ("STRING", {"forceInput": True})
+            }
+        }
+    RETURN_TYPES = ("STRING", "STRING",)
+    RETURN_NAMES = ("positive","negative",)
+    FUNCTION = "run"
+    OUTPUT_NODE = False
+    CATEGORY = CATEGORY_PROMPT
+
+    def run(self, prompt: str):
+        # 1. 抽出とバリデーション(前方のカンマ/空白を巻き込んでマッチ)
+        pattern = r",?\s*-\(([^)]+)\)"
+        negatives = []
+
+        def replace_func(match):
+            inner = match.group(1)
+            # バリデーション
+            if "(" in inner or inner.count(":") > 1:
+                raise ValueError(f"Invalid tag syntax: {match.group(0)}")
+
+            normalized_tag = f"({inner.replace(':-', ':')})"
+            negatives.append(normalized_tag)
+
+            return ""
+
+        # 2. 置換実行
+        positive = re.sub(pattern, replace_func, prompt)
+
+        # 3. 整形
+        positive = positive.strip(", ")
+        negative = ", ".join(negatives)
+
+        return (positive, negative,)
 
 class PromptToFileNameNode:
     @classmethod
