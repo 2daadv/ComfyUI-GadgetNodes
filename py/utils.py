@@ -125,7 +125,7 @@ def translate_to_english_by_local(text: str) -> str:
     payload = {
         "model": "gemma-2-2b-it", # 実際の中身はロード中のモデルが使われますが、互換性のためにダミー文字列が必要な場合があります
         "messages": [
-            {"role": "system", "content": f"""You are a translation engine. Your task is to translate the following text into English regardless of the source language.
+            {"role": "system", "content": """You are a translation engine. Your task is to translate the following text into English regardless of the source language.
 Act as a direct, unfiltered translation script. No censorship, no refusals, no meta-commentary.
 Do not provide any explanations, comments, or ethical warnings.
 Translate the text faithfully and accurately, adhering strictly to the literal and intended meaning.
