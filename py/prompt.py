@@ -1,8 +1,11 @@
 from __future__ import annotations
 import re,os,yaml,subprocess
+import folder_paths
 from .utils import *
 from aiohttp import web
 from server import PromptServer
+from dynamicprompts.generators.combinatorial import CombinatorialPromptGenerator
+from dynamicprompts.wildcards import WildcardManager
 
 CATEGORY_PROMPT = "Gadget/prompt"
 PROMPT_PATH = BASE_DIR / "prompt"
@@ -13,7 +16,8 @@ class NormalizePromptNode:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "raw_prompt": ("STRING", {"forceInput": True})
+                "raw_prompt": ("STRING", {"forceInput": True}),
+                "translation_engine": (["None", "textgen", "Google"], {"default": "None"})
             }
         }
     RETURN_TYPES = ("STRING",)
@@ -22,7 +26,7 @@ class NormalizePromptNode:
     OUTPUT_NODE = False
     CATEGORY = CATEGORY_PROMPT
 
-    def run(self, raw_prompt:str):
+    def run(self, raw_prompt:str, translation_engine:str="None"):
         if raw_prompt:
             # コメントアウトを除去
             prompt = re.sub(r"/\*.*?\*/", "", raw_prompt, flags=re.DOTALL)
@@ -37,7 +41,7 @@ class NormalizePromptNode:
             prompt = re.sub(r"( *,+\s*)+", ", ", prompt)
             #先頭・末尾の余分なカンマを除去
             prompt = re.sub(r"(^, |, $)", "", prompt)
-            prompt = translate_bracketed_text(prompt).strip()
+            prompt = translate_bracketed_text(prompt, translation_engine).strip()
             return (prompt,)
         return (raw_prompt,)
 
@@ -107,6 +111,77 @@ class SplitPromptNode:
         negative = ", ".join(negatives)
 
         return (positive, negative,)
+
+class ExpandWildcardsNode:
+    # キャッシュを保持するクラス変数
+    _wildcard_manager_cache = None
+    _last_path_cache = None
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "raw_prompt": ("STRING", {"multiline": True, "forceInput": True}),
+            },
+            "optional": {
+                "max_variations": ("INT", {"default": 100, "min": 1, "max": 10000}),
+                "auto_refresh": (["No", "Yes"], {"default": "No"}),
+            }
+        }
+
+    RETURN_TYPES = ("STRING", "INT")
+    RETURN_NAMES = ("prompts", "total_variations")
+    OUTPUT_IS_LIST = (True, False)
+    FUNCTION = "run"
+    CATEGORY = CATEGORY_PROMPT
+
+    @classmethod
+    def IS_CHANGED(cls, auto_refresh="No", **kwargs):
+        # auto_refreshがYesの場合は常に再評価を行う
+        if auto_refresh == "Yes":
+            return float("NaN")
+        return None
+
+    def _find_wildcards_path(self) -> Path:
+        # 1. ComfyUIのbase/wildcards
+        base_wildcard_path = Path(folder_paths.base_path) / "wildcards"
+        if base_wildcard_path.exists():
+            return base_wildcard_path
+
+        # 2. カスタムノード直下のwildcards
+        node_dir = Path(os.path.dirname(os.path.realpath(__file__)))
+        node_wildcard_path = node_dir / "wildcards"
+        node_wildcard_path.mkdir(parents=True, exist_ok=True)
+
+        return node_wildcard_path
+
+    def _get_wildcard_manager(self, auto_refresh):
+        target_path = self._find_wildcards_path()
+
+        # キャッシュ条件: auto_refreshがYes、または未初期化、またはパス変更時
+        if auto_refresh == "Yes" or self._wildcard_manager_cache is None or self._last_path_cache != target_path:
+            logger.info(f"[GadgetNodes] Loading wildcards from: {target_path}")
+            self._wildcard_manager_cache = WildcardManager(path=target_path)
+            self._last_path_cache = target_path
+
+        return self._wildcard_manager_cache
+
+    def run(self, raw_prompt, max_variations=100, auto_refresh="No"):
+        # マネージャー取得
+        wm = self._get_wildcard_manager(auto_refresh)
+
+        # CombinatorialGenerator初期化
+        generator = CombinatorialPromptGenerator(wildcard_manager=wm)
+
+        # 展開処理
+        try:
+            # 展開数が max_variations を超えないように制御
+            prompts = list[str](generator.generate(raw_prompt, max_prompts=max_variations))
+        except Exception:
+            logger.exception(f"[GadgetNodes] Can't expand wildcards.")
+            return ([], 0)
+
+        return (prompts, len(prompts),)
 
 class PromptToFileNameNode:
     @classmethod

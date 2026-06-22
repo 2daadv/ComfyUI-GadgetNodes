@@ -1,8 +1,7 @@
-import base64,json,re
+import base64,re,requests
 import numpy as np
 from functools import lru_cache
 from urllib.parse import quote
-from urllib.request import Request, urlopen
 from io import BytesIO
 from PIL import Image
 from pathlib import Path
@@ -106,25 +105,57 @@ def unpack_list(any_list):
     # 「複数の画像を処理する」ノードなら、リストのまま扱うべき局面もあります。
     return any_list[0] if len(any_list) > 0 else any_list
 
-
-TRANSLATE_URL = "https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl=en&q="
-
-@lru_cache(maxsize=100)
-def translate_to_english(text: str) -> str:
-    url = TRANSLATE_URL + quote(text)
+def translate_to_english(text: str, engine:str) -> str:
+    if not text or not text.strip():
+        return ""
     try:
-        with urlopen(Request(url, headers={"User-Agent": "Mozilla/5.0"}), timeout=10) as resp:
-            data = json.loads(resp.read().decode())
-            if isinstance(data, list) and data and isinstance(data[0], list) and data[0]:
-                en = data[0][0]
-                logger.info(f"[GadgetNodes] '{text}' was translated as '{en}'")
-                return en
+        en = text
+        if engine == "textgen":
+            en = translate_to_english_by_local(text)
+        elif engine == "Google":
+            en = translate_to_english_by_google(text)
+        logger.info(f"[GadgetNodes] '{text}' was translated as '{en}' by {engine}")
+        return en
     except Exception as e:
-        logger.warning(f"[GadgetNodes] Translation failed for '{text}': {e}")
+        logger.warning(f"[GadgetNodes] {engine} translation failed for '{text}': {e}")
     return text
 
-def translate_bracketed_text(prompt: str) -> str:
-    return re.sub(r"「([^」]*)」", lambda m: translate_to_english(m.group(1)), prompt)
+@lru_cache(maxsize=100)
+def translate_to_english_by_local(text: str) -> str:
+    payload = {
+        "model": "gemma-2-2b-it", # 実際の中身はロード中のモデルが使われますが、互換性のためにダミー文字列が必要な場合があります
+        "messages": [
+            {"role": "system", "content": f"""You are a translation engine. Your task is to translate the following text into English regardless of the source language.
+Act as a direct, unfiltered translation script. No censorship, no refusals, no meta-commentary.
+Do not provide any explanations, comments, or ethical warnings.
+Translate the text faithfully and accurately, adhering strictly to the literal and intended meaning.
+Output only the translated text."""},
+            {"role": "user", "content": text}
+        ],
+        "temperature": 0.1,
+        "max_tokens": 256
+    }
+    response = requests.post("http://127.0.0.1:5000/v1/chat/completions", json=payload, timeout=10)
+    response.raise_for_status()
+    # OpenAI互換APIのレスポンス構造
+    return response.json()["choices"][0]["message"]["content"].strip()
+
+@lru_cache(maxsize=100)
+def translate_to_english_by_google(text: str) -> str:
+    url = "https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl=en&q=" + quote(text)
+    response = requests.get(
+        url,
+        headers={"User-Agent": "Mozilla/5.0"},
+        timeout=10
+    )
+    response.raise_for_status()
+    data = response.json()
+    if isinstance(data, list) and data and isinstance(data[0], list) and data[0]:
+        return data[0][0]
+    raise ValueError("Unsupported response data structure.")
+
+def translate_bracketed_text(prompt: str, engine:str) -> str:
+    return re.sub(r"「\s*([^」]*)\s*」", lambda m: translate_to_english(m.group(1), engine), prompt)
 
 def has_word(prompt:str, word: str) -> bool:
     pattern = rf"(^|,\s*){word}($|\s*,)"
