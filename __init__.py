@@ -12,6 +12,7 @@ NODE_CLASS_MAPPINGS = {
     "Expand Wildcards": ExpandWildcardsNode,
     "Prompt To FileName": PromptToFileNameNode,
     "Any Pass": AnyPassNode,
+    "Any Print": AnyPrintNode,
     "++1": IncrementNode,
     "--1": DecrementNode,
     "Int Equals": IntEqualsNode,

@@ -31,7 +31,6 @@ def flatten(any_list:list):
                 result.append(item)
     return result
 
-
 def get_image_mimetype(file_path):
     """バイナリヘッダーからMIMEタイプを判別する"""
     try:
