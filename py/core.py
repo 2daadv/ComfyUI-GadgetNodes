@@ -32,12 +32,15 @@ class AnyPrintNode:
         return (value,)
 
     def format_summary(self, data):
-        if isinstance(data, torch.Tensor):
+        if isinstance(data, (int, float, bool, str)):
+            return f"{type(data).__name__}: {str(data)}"
+        elif isinstance(data, torch.Tensor):
             # Batchサイズを明示的に判定して表示
             batch_size = data.shape[0]
             batch_str = f"Batch: {batch_size}, " if data.dim() > 1 and batch_size > 1 else ""
             return f"[Tensor] {batch_str}Shape: {list(data.shape)}, Dtype: {data.dtype}, Device: {data.device}"
-        return f"{type(data).__name__}: {str(data)[:100]}"
+        s = str(data)
+        return f"{type(data).__name__}: {s[:100]}{'...' if len(s) > 100 else ''}"
 
     def dump_data(self, data, depth=0, current_stack=None, label=None, path=""):
         if current_stack is None:
