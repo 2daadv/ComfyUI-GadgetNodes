@@ -16,8 +16,8 @@ app.registerExtension({
                     const widget = this.widgets?.find(w => w.name === name);
                     if (widget) {
                         widget.value = value;
-                    } 
-                    
+                    }
+
                     // 外部入力（PrimitiveNode等）に接続されている場合
                     const input = this.inputs?.find(i => i.name === name);
                     if (input && input.link !== null) {
@@ -33,44 +33,35 @@ app.registerExtension({
                     }
                 };
 
-                // --- ckpt_name変更時のトリガー ---
-                const ckptWidget = this.widgets.find((w) => w.name === "ckpt_name");
-                if (ckptWidget) {
-                    const oldCallback = ckptWidget.callback;
-                    ckptWidget.callback = async (value) => {
+                // --- model_name変更時のトリガー ---
+                const modelWidget = this.widgets.find((w) => w.name === "model_name");
+                if (modelWidget) {
+                    const oldCallback = modelWidget.callback;
+                    modelWidget.callback = async (value) => {
                         const res = oldCallback ? oldCallback.apply(this, arguments) : undefined;
-                        
                         try {
-                            const response = await fetch(`/gadget_nodes/model/get_ckpt_preset?ckpt_name=${encodeURIComponent(value)}`);
+                            const response = await fetch(`/gadget_nodes/model/get_model_preset?model_name=${encodeURIComponent(value)}`);
                             if (response.ok) {
                                 const preset = await response.json();
-                                
-                                // GUI反映（プリセット名も更新）
-                                updateValue("vae_name", preset.vae_name);
-                                updateValue("clip_skip", preset.clip_skip);
-                                updateValue("steps", preset.steps_total || preset.steps);
-                                updateValue("cfg", preset.cfg);
-                                updateValue("sampler_name", preset.sampler_name);
-                                updateValue("scheduler", preset.scheduler);
-                                updateValue("positive", preset.positive);
-                                updateValue("negative", preset.negative);
-                                updateValue("preset_name", preset.preset_name);
-
+                                // プリセットの全項目を一括で反映
+                                Object.entries(preset).forEach(([key, val]) => {
+                                    updateValue(key, val);
+                                });
                                 this.setDirtyCanvas(true);
                             } else {
-                                // 見つからない場合はクリア
+                                // 見つからない場合はプリセット名をクリア
                                 updateValue("preset_name", "(none)");
                             }
                         } catch (e) {
-                            console.error(e);
+                            console.error("Failed to load model preset:", e);
                         }
                         return res;
                     };
                     // ノード作成時の初期実行
                     // setTimeout を使うことで、ノードの構築が完全に終わった直後に実行させる
                     setTimeout(() => {
-                        if (ckptWidget.value) {
-                            ckptWidget.callback(ckptWidget.value);
+                        if (modelWidget.value) {
+                            modelWidget.callback(modelWidget.value);
                         }
                     }, 1);
                 }
@@ -96,7 +87,7 @@ app.registerExtension({
                         "activation_text": "",
                         "preferred_weight": 1.0,
                         "negative_text": "",
-                        "notes": ""
+                        "notes": "",
                     };
                     for (const [key, val] of Object.entries(defaults)) {
                         const w = getW(key);
@@ -116,7 +107,7 @@ app.registerExtension({
                         clearFields();
                         return false;
                     }
-                    
+
                     const data = await response.json();
                     // JSONがない、または空の場合
                     if (!data || !data.json || Object.keys(data.json).length === 0) {
@@ -141,7 +132,7 @@ app.registerExtension({
                         "activation_text": activation_text,
                         "preferred_weight": preferred_weight,
                         "negative_text": info["negative text"],
-                        "notes": info.notes
+                        "notes": info.notes,
                     };
 
                     for (const [key, val] of Object.entries(widgetMap)) {
@@ -196,7 +187,7 @@ app.registerExtension({
                         activation_text: getVal("activation_text"),
                         preferred_weight: parseFloat(getVal("preferred_weight")),
                         negative_text: getVal("negative_text"),
-                        notes: getVal("notes")
+                        notes: getVal("notes"),
                     };
 
                     try {
@@ -268,13 +259,13 @@ app.registerExtension({
             nodeType.prototype.onDrawForeground = function(ctx) {
                 if (!this.flags.collapsed && this.lora_thumb) {
                     const img = this.lora_thumb;
-                    
+
                     // 描画エリアの計算
                     const x = 5;
                     const y = 5; // タイトルバーやウィジェットを避けるための上部余白
                     const maxW = this.size[0] - 10; // ノード幅の45%程度を使用
                     const maxH = 154;
-                    
+
                     let drawW = img.width;
                     let drawH = img.height;
                     const scale = Math.min(maxW / drawW, maxH / drawH);
@@ -286,7 +277,7 @@ app.registerExtension({
                     ctx.fillStyle = "#000000AA";
                     ctx.strokeStyle = "#666666";
                     ctx.lineWidth = 1;
-                    
+
                     ctx.beginPath();
                     ctx.roundRect(x - 2, y - 2, drawW + 4, drawH + 4, 4);
                     ctx.fill();
@@ -306,14 +297,14 @@ app.registerExtension({
         if (nodeData.name === "Edit SD Checkpoint Information") {
 
             // 情報更新のコア関数
-            const refreshCheckPointData = async (node, ckptName) => {
+            const refreshCheckPointData = async (node, modelName) => {
                 const getW = (name) => node.widgets.find(w => w.name === name);
                 // --- 共通のリセット処理 ---
                 const clearFields = () => {
                     const defaults = {
                         "description": "",
                         "notes": "",
-                        "vae": "None"
+                        "vae": "None",
                     };
                     for (const [key, val] of Object.entries(defaults)) {
                         const w = getW(key);
@@ -322,18 +313,18 @@ app.registerExtension({
                     node.lora_thumb = null;
                     node.setDirtyCanvas(true);
                 };
-                if (!ckptName) {
+                if (!modelName) {
                     clearFields();
                     return;
                 }
                 try {
-                    const response = await fetch(`/gadget_nodes/model/get_ckpt_info?ckpt_name=${encodeURIComponent(ckptName)}`);
+                    const response = await fetch(`/gadget_nodes/model/get_model_info?model_name=${encodeURIComponent(modelName)}`);
                     // 200以外（404など）の場合はフィールドをクリア
                     if (!response.ok) {
                         clearFields();
                         return false;
                     }
-                    
+
                     const data = await response.json();
                     // JSONがない、または空の場合
                     if (!data || !data.json || Object.keys(data.json).length === 0) {
@@ -352,7 +343,7 @@ app.registerExtension({
                     const widgetMap = {
                         "description": info.description,
                         "notes": info.notes,
-                        "vae": info.vae
+                        "vae": info.vae,
                     };
 
                     for (const [key, val] of Object.entries(widgetMap)) {
@@ -390,9 +381,9 @@ app.registerExtension({
 
                 // --- Saveボタンの追加 ---
                 node.addWidget("button", "Save", null, () => {
-                    const ckptName = node.widgets.find(w => w.name === "ckpt_name")?.value;
+                    const modelName = node.widgets.find(w => w.name === "model_name")?.value;
 
-                    if (!ckptName) return;
+                    if (!modelName) return;
 
                     saveCheckPointInfo(node);
                 });
@@ -402,14 +393,14 @@ app.registerExtension({
                     const getVal = (name) => node.widgets.find(w => w.name === name)?.value;
 
                     const payload = {
-                        ckpt_name: getVal("ckpt_name"),
+                        model_name: getVal("model_name"),
                         description: getVal("description"),
                         notes: getVal("notes"),
-                        vae: getVal("vae")
+                        vae: getVal("vae"),
                     };
 
                     try {
-                        const response = await fetch("/gadget_nodes/model/save_ckpt_info", {
+                        const response = await fetch("/gadget_nodes/model/save_model_info", {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
                             body: JSON.stringify(payload)
@@ -427,7 +418,7 @@ app.registerExtension({
 
                 // 各ウィジェットの参照を取得
                 const getW = (name) => node.widgets.find(w => w.name === name);
-                const wCheckPoint = getW("ckpt_name");
+                const wCheckPoint = getW("model_name");
 
                 // 1. 値の変更を監視 (Setterオーバーライドで外部入力にも対応)
                 let val = wCheckPoint.value;
@@ -461,13 +452,13 @@ app.registerExtension({
             nodeType.prototype.onDrawForeground = function(ctx) {
                 if (!this.flags.collapsed && this.lora_thumb) {
                     const img = this.lora_thumb;
-                    
+
                     // 描画エリアの計算
                     const x = 5;
                     const y = 5; // タイトルバーやウィジェットを避けるための上部余白
                     const maxW = this.size[0] - 10; // ノード幅の45%程度を使用
                     const maxH = 75;
-                    
+
                     let drawW = img.width;
                     let drawH = img.height;
                     const scale = Math.min(maxW / drawW, maxH / drawH);
@@ -479,7 +470,7 @@ app.registerExtension({
                     ctx.fillStyle = "#000000AA";
                     ctx.strokeStyle = "#666666";
                     ctx.lineWidth = 1;
-                    
+
                     ctx.beginPath();
                     ctx.roundRect(x - 2, y - 2, drawW + 4, drawH + 4, 4);
                     ctx.fill();

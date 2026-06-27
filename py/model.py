@@ -12,6 +12,8 @@ from .utils import *
 CATEGORY_MODEL = "Gadget/model"
 DEFAULT_PRESET = {
     "vae_name": "None",
+    "clip_name": "None",
+    "clip_type": "stable_diffusion",
     "clip_skip": -2,
     "steps": 30,
     "cfg": 7,
@@ -22,14 +24,29 @@ DEFAULT_PRESET = {
 }
 MODELS_CONFIG_FILE_PATH = BASE_DIR / "models_config.yaml"
 
+@lru_cache(maxsize=1)
+def get_models():
+    return {
+        **{name: "diffusion_models" for name in folder_paths.get_filename_list("diffusion_models")},
+        **{name: "checkpoints" for name in folder_paths.get_filename_list("checkpoints")}
+    }
+
+def get_model_names():
+    return list[str](get_models().keys())
+
+def get_model_type(model_name):
+    return get_models().get(model_name, None)
 
 class CheckpointPresetLoaderNode:
     @classmethod
     def INPUT_TYPES(cls):
+        get_models.cache_clear()
         return {
             "required": {
-                "ckpt_name": (folder_paths.get_filename_list("checkpoints"),),
+                "model_name": (get_model_names(),),
                 "vae_name": (["None"] + folder_paths.get_filename_list("vae"),),
+                "clip_name": (["None"] + folder_paths.get_filename_list("text_encoders"),),
+                "clip_type": ([item.name.lower() for item in comfy.sd.CLIPType],),
                 "clip_skip": ("INT", {"default": -2, "min": -9, "max": 0, "step": 1}),
                 "steps": ("INT", {"default": 30, "min": 1, "max": MAX_RESOLUTION, "step": 1}),
                 "cfg": ("FLOAT", {"default": 7.0, "min": 0.0, "max": 100.0, "step": 0.1}),
@@ -42,16 +59,16 @@ class CheckpointPresetLoaderNode:
                 "preset_name": ("STRING", {"default": "", "multiline": False}),
             }
         }
-    RETURN_TYPES = (any_type, any_type, "INT", "INT", "FLOAT", any_type, any_type, "STRING", "STRING")
-    RETURN_NAMES = ("ckpt_name", "vae_name", "clip_skip", "steps", "cfg", "sampler_name", "scheduler", "positive", "negative")
+    RETURN_TYPES = (any_type, any_type, any_type, any_type, "INT", "INT", "FLOAT", any_type, any_type, "STRING", "STRING")
+    RETURN_NAMES = ("model_name", "vae_name", "clip_name", "clip_type", "clip_skip", "steps", "cfg", "sampler_name", "scheduler", "positive", "negative")
     FUNCTION = "run"
     CATEGORY = CATEGORY_MODEL
 
-    def run(self, ckpt_name, vae_name, clip_skip, steps, cfg, sampler_name, scheduler, positive="", negative="", preset_name=None):
-        return (ckpt_name, vae_name, clip_skip, steps, cfg, sampler_name, scheduler, positive, negative)
+    def run(self, model_name, vae_name, clip_name, clip_type, clip_skip, steps, cfg, sampler_name, scheduler, positive="", negative="", preset_name=None):
+        return (model_name, vae_name, clip_name, clip_type, clip_skip, steps, cfg, sampler_name, scheduler, positive, negative)
 
 
-def get_ckpt_preset(ckpt_name):
+def get_model_preset(model_name):
     result = {}
     preset_names = []
     try:
@@ -59,7 +76,7 @@ def get_ckpt_preset(ckpt_name):
             all_presets = yaml.safe_load(file)
             keywords = all_presets.pop("__keywords__")
             for preset_pattern, preset in all_presets.items():
-                if re.search(str(preset_pattern), ckpt_name):
+                if re.search(str(preset_pattern), model_name):
                     old_size = len(result)
                     result = preset | result
                     if old_size < len(result):
@@ -75,11 +92,11 @@ def get_ckpt_preset(ckpt_name):
     return DEFAULT_PRESET | result
 
 
-@PromptServer.instance.routes.get("/gadget_nodes/model/get_ckpt_preset")
-async def get_ckpt_preset_api(request):
-    ckpt_name = request.query.get("ckpt_name", "")
-    if ckpt_name:
-        preset = get_ckpt_preset(ckpt_name)
+@PromptServer.instance.routes.get("/gadget_nodes/model/get_model_preset")
+async def get_model_preset_api(request):
+    model_name = request.query.get("model_name", "")
+    if model_name:
+        preset = get_model_preset(model_name)
         if preset:
             return web.json_response(preset)
     return web.json_response({"error": "preset not found"}, status=404)
@@ -88,15 +105,16 @@ async def get_ckpt_preset_api(request):
 class LoadCheckpointOrDiffusionModelNode:
     @classmethod
     def INPUT_TYPES(cls):
+        get_models.cache_clear()
         return {
             "required": {
-                "model_name": (folder_paths.get_filename_list("checkpoints") + folder_paths.get_filename_list("diffusion_models"),),
-                "vae_name": (["None"] + folder_paths.get_filename_list("vae"),),
+                "model_name": (get_model_names(),),
+                "clip_type": ([item.name.lower() for item in comfy.sd.CLIPType],),
                 "clip_skip": ("INT", {"default": -2, "min": -9, "max": 0, "step": 1}),
-                "is_anima": ("BOOLEAN", {"default": False}),
             },
             "optional": {
-                "clip_name": (folder_paths.get_filename_list("text_encoders"),),
+                "clip_name": (["None"] + folder_paths.get_filename_list("text_encoders"),),
+                "vae_name": (["None"] + folder_paths.get_filename_list("vae"),),
             },
         }
     RETURN_TYPES = ("MODEL", "CLIP", "VAE")
@@ -105,30 +123,32 @@ class LoadCheckpointOrDiffusionModelNode:
     CATEGORY = CATEGORY_MODEL
 
     @classmethod
-    def VALIDATE_INPUTS(cls, is_anima, vae_name, clip_name=None, **kwargs):
-        if is_anima:
-            if not clip_name:
-                return "Anima (Diffusion Model) requires clip_name."
-            if vae_name == "None":
-                return "Anima (Diffusion Model) requires an external VAE. Please select a VAE instead of 'None'."
+    def VALIDATE_INPUTS(cls, model_name, clip_name=None, vae_name=None, **kwargs):
+        if get_model_type(model_name) == "diffusion_models":
+            if not clip_name or clip_name == "None":
+                return "Diffusion Model requires clip_name."
+            if not vae_name or vae_name == "None":
+                return "Diffusion Model requires an external VAE."
         return True
 
-    def run(self, model_name, vae_name, clip_skip, is_anima, clip_name=None):
+    def run(self, model_name, clip_type, clip_skip, clip_name=None, vae_name=None):
         embedding_directory = folder_paths.get_folder_paths("embeddings")
         baked_vae = None
+        model_type = get_model_type(model_name)
 
-        if is_anima:
+        if model_type == "diffusion_models":
             model_path = folder_paths.get_full_path_or_raise("diffusion_models", model_name)
             model = comfy.sd.load_diffusion_model(model_path)
             clip_path = folder_paths.get_full_path_or_raise("text_encoders", clip_name)
             clip = comfy.sd.load_clip(
                 ckpt_paths=[clip_path],
+                clip_type=getattr(comfy.sd.CLIPType, clip_type.upper(), comfy.sd.CLIPType.STABLE_DIFFUSION),
                 embedding_directory=embedding_directory,
             )
-        else:
-            ckpt_path = folder_paths.get_full_path_or_raise("checkpoints", model_name)
+        elif model_type == "checkpoints":
+            model_path = folder_paths.get_full_path_or_raise("checkpoints", model_name)
             model, clip, baked_vae, _ = comfy.sd.load_checkpoint_guess_config(
-                ckpt_path,
+                model_path,
                 output_vae=True,
                 output_clip=True,
                 embedding_directory=embedding_directory,
@@ -138,7 +158,7 @@ class LoadCheckpointOrDiffusionModelNode:
             clip = clip.clone()
             clip.clip_layer(clip_skip)
 
-        if vae_name == "None":
+        if not vae_name or vae_name == "None":
             vae = baked_vae
         else:
             vae_path = folder_paths.get_full_path_or_raise("vae", vae_name)
@@ -176,17 +196,16 @@ class SDLoraInfoEditorNode:
     def run(self, lora_name, lora_prompt="", description="", sd_version="SDXL", activation_text="", preferred_weight=1.0, negative_text="", notes=""):
         return (lora_name, lora_prompt, description, sd_version, activation_text, preferred_weight, negative_text, notes)
 
-
 @PromptServer.instance.routes.get("/gadget_nodes/model/get_lora_info")
 async def get_lora_info(request):
     lora_name = request.query.get("lora_name", "")
     full_path = folder_paths.get_full_path("loras", lora_name)
-    
+
     if not full_path:
         return web.json_response({"error": "lora not found"}, status=404)
 
     base_path, _ = os.path.splitext(full_path)
-    
+
     json_data = {}
     if os.path.exists(base_path + ".json"):
         try:
@@ -208,12 +227,11 @@ async def get_lora_info(request):
         "thumb": thumb_data
     })
 
-
 @PromptServer.instance.routes.post("/gadget_nodes/model/save_lora_info")
 async def save_lora_info(request):
     data = await request.json()
     lora_name = data.get("lora_name")
-    
+
     full_path = folder_paths.get_full_path("loras", lora_name)
     if not full_path:
         return web.json_response({"error": "Lora path not found"}, status=404)
@@ -238,14 +256,14 @@ async def save_lora_info(request):
         logger.exception(f"[GadgetNodes] Can't write {json_path}.")
         return web.json_response({"error": str(e)}, status=500)
 
-
 #=============================================================================
 class SDCheckpointInfoEditorNode:
     @classmethod
     def INPUT_TYPES(cls):
+        get_models.cache_clear()
         return {
             "required": {
-                "ckpt_name": (folder_paths.get_filename_list("checkpoints"),),
+                "model_name": (get_model_names(),),
             },
             "optional": {
                 "description": ("STRING", {"default": "", "multiline": True}),
@@ -254,22 +272,21 @@ class SDCheckpointInfoEditorNode:
             }
         }
     RETURN_TYPES = (any_type, "STRING", "STRING", "STRING",)
-    RETURN_NAMES = ("ckpt_name", "description", "notes", "vae",)
+    RETURN_NAMES = ("model_name", "description", "notes", "vae",)
     OUTPUT_NODE = True
     FUNCTION = "run"
     CATEGORY = CATEGORY_MODEL
 
-    def run(self, ckpt_name, description="", notes="", vae="None",):
-        return (ckpt_name, description, notes, vae,)
+    def run(self, model_name, description="", notes="", vae="None",):
+        return (model_name, description, notes, vae,)
 
-
-@PromptServer.instance.routes.get("/gadget_nodes/model/get_ckpt_info")
-async def get_ckpt_info(request):
-    ckpt_name = request.query.get("ckpt_name", "")
-    full_path = folder_paths.get_full_path("checkpoints", ckpt_name)
+@PromptServer.instance.routes.get("/gadget_nodes/model/get_model_info")
+async def get_model_info(request):
+    model_name = request.query.get("model_name", "")
+    full_path = folder_paths.get_full_path(get_model_type(model_name), model_name)
 
     if not full_path:
-        return web.json_response({"error": "ckpt not found"}, status=404)
+        return web.json_response({"error": "model not found"}, status=404)
 
     base_path, _ = os.path.splitext(full_path)
 
@@ -294,14 +311,14 @@ async def get_ckpt_info(request):
         "thumb": thumb_data
     })
 
-@PromptServer.instance.routes.post("/gadget_nodes/model/save_ckpt_info")
-async def save_ckpt_info(request):
+@PromptServer.instance.routes.post("/gadget_nodes/model/save_model_info")
+async def save_model_info(request):
     data = await request.json()
-    ckpt_name = data.get("ckpt_name")
+    model_name = data.get("model_name")
 
-    full_path = folder_paths.get_full_path("checkpoints", ckpt_name)
+    full_path = folder_paths.get_full_path(get_model_type(model_name), model_name)
     if not full_path:
-        return web.json_response({"error": "ckpt path not found"}, status=404)
+        return web.json_response({"error": "model not found"}, status=404)
 
     base_path, _ = os.path.splitext(full_path)
     json_path = base_path + ".json"
