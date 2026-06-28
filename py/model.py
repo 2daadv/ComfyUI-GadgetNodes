@@ -32,6 +32,7 @@ def get_models():
     }
 
 def get_model_names():
+    get_models.cache_clear()
     return list[str](get_models().keys())
 
 def get_model_type(model_name):
@@ -40,7 +41,6 @@ def get_model_type(model_name):
 class CheckpointPresetLoaderNode:
     @classmethod
     def INPUT_TYPES(cls):
-        get_models.cache_clear()
         return {
             "required": {
                 "model_name": (get_model_names(),),
@@ -105,7 +105,6 @@ async def get_model_preset_api(request):
 class LoadCheckpointOrDiffusionModelNode:
     @classmethod
     def INPUT_TYPES(cls):
-        get_models.cache_clear()
         return {
             "required": {
                 "model_name": (get_model_names(),),
@@ -260,7 +259,6 @@ async def save_lora_info(request):
 class SDCheckpointInfoEditorNode:
     @classmethod
     def INPUT_TYPES(cls):
-        get_models.cache_clear()
         return {
             "required": {
                 "model_name": (get_model_names(),),

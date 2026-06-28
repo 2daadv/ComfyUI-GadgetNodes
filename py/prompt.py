@@ -201,7 +201,7 @@ class PromptToFileNameNode:
         if prompt:
             result = prompt.replace(", ", ",")
             result = re.sub(r'[\\/:*?"<>|\n\r\t]', "_", result, flags=re.MULTILINE)
-            result = result[:200]
+            result = result[:160]
             result = re.sub("\\.+$", "_", result)
             return (result,)
         return ("ComfyUI",)
