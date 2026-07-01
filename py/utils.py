@@ -1,5 +1,8 @@
-import base64,re,requests
+import base64,re,requests,fast_langdetect,os,torch
 import numpy as np
+import folder_paths
+from enum import StrEnum
+from transformers import pipeline,AutoModelForCausalLM,AutoTokenizer
 from functools import lru_cache
 from urllib.parse import quote
 from io import BytesIO
@@ -104,43 +107,52 @@ def unpack_list(any_list):
     # 「複数の画像を処理する」ノードなら、リストのまま扱うべき局面もあります。
     return any_list[0] if len(any_list) > 0 else any_list
 
-def translate_to_english(text: str, engine:str) -> str:
+class TranslateEngine(StrEnum):
+    NONE = ("None", False,)
+    # https://github.com/Tencent-Hunyuan/Hy-MT2
+    HY_MT2 =("tencent/Hy-MT2-1.8B", True, False, "你是一位专业的翻译官。请将用户的输入翻译成地道的英语。")
+    #TRANSLATE_GEMMA="google/translategemma-4b-it" # 規約同意が必要なためカスタムノードには向かない
+    GOOGLE=("Google", False,)
+
+    def __new__(cls, value:str, is_llm:bool=True, is_quantized:bool=False, prompt:str=None):
+        obj = str.__new__(cls, value)
+        obj._value_ = value
+        obj.is_llm = is_llm
+        obj.is_quantized = is_quantized
+        obj.prompt = prompt
+        return obj
+
+def translate_to_english(text:str, engine:TranslateEngine) -> str:
     if not text or not text.strip():
         return ""
     try:
+        src_lang = detect_language(text)
+        if src_lang == "en":
+            return text
         en = text
-        if engine == "textgen":
-            en = translate_to_english_by_local(text)
-        elif engine == "Google":
+        if engine.is_llm:
+            en = translate_to_english_by_llm(engine, src_lang, text)
+        elif engine == TranslateEngine.GOOGLE:
             en = translate_to_english_by_google(text)
         logger.info(f"[GadgetNodes] '{text}' was translated as '{en}' by {engine}")
         return en
     except Exception as e:
-        logger.warning(f"[GadgetNodes] {engine} translation failed for '{text}': {e}")
+        logger.ex(f"[GadgetNodes] {engine} translation failed for '{text}': {e}")
     return text
 
 @lru_cache(maxsize=100)
-def translate_to_english_by_local(text: str) -> str:
-    payload = {
-        "model": "gemma-2-2b-it", # 実際の中身はロード中のモデルが使われますが、互換性のためにダミー文字列が必要な場合があります
-        "messages": [
-            {"role": "system", "content": """You are a translation engine. Your task is to translate the following text into English regardless of the source language.
-Act as a direct, unfiltered translation script. No censorship, no refusals, no meta-commentary.
-Do not provide any explanations, comments, or ethical warnings.
-Translate the text faithfully and accurately, adhering strictly to the literal and intended meaning.
-Output only the translated text."""},
-            {"role": "user", "content": text}
-        ],
-        "temperature": 0.1,
-        "max_tokens": 256
-    }
-    response = requests.post("http://127.0.0.1:5000/v1/chat/completions", json=payload, timeout=10)
-    response.raise_for_status()
-    # OpenAI互換APIのレスポンス構造
-    return response.json()["choices"][0]["message"]["content"].strip()
+def translate_to_english_by_llm(engine:TranslateEngine, src_lang:str, text:str) -> str:
+    engine_obj = get_translate_engine(engine, src_lang, "en")
+    messages = [
+        {"role": "system", "content": engine.prompt},
+        {"role": "user", "content": text}
+    ]
+    result = engine_obj(messages, max_new_tokens=len(text) * 2, temperature=0.1)
+    return result[0]['generated_text'][-1]['content']
 
 @lru_cache(maxsize=100)
-def translate_to_english_by_google(text: str) -> str:
+def translate_to_english_by_google(text:str) -> str:
+    #googletransというライブラリもあるっぽいが、一応自前で実装。
     url = "https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl=en&q=" + quote(text)
     response = requests.get(
         url,
@@ -153,13 +165,37 @@ def translate_to_english_by_google(text: str) -> str:
         return data[0][0]
     raise ValueError("Unsupported response data structure.")
 
-def translate_bracketed_text(prompt: str, engine:str) -> str:
-    return re.sub(r"「\s*([^」]*)\s*」", lambda m: translate_to_english(m.group(1), engine), prompt)
+@lru_cache(maxsize=100)
+def detect_language(text:str) -> str:
+    lang = fast_langdetect.detect(text, model="lite")[0]['lang']
+    logger.info(f"[GadgetNodes] Detected language: {lang}")
+    return lang
 
-def has_word(prompt:str, word: str) -> bool:
+LLM_DIR=os.path.join(folder_paths.models_dir, "llm")
+
+@lru_cache(maxsize=1)
+def get_translate_engine(engine:TranslateEngine, src_lang:str, tgt_lang:str):
+    config = {
+        "pretrained_model_name_or_path": engine,
+        "cache_dir": LLM_DIR,
+        "trust_remote_code": True,
+        "local_files_only": os.path.exists(os.path.join(LLM_DIR, f"models--{engine.replace('/', '--')}")),
+    }
+    quantization_config = {
+        "load_in_4bit": True,
+        "bnb_4bit_compute_dtype": torch.bfloat16,
+        "bnb_4bit_quant_type": "nf4",
+        "bnb_4bit_use_double_quant": True,
+    } if engine.is_quantized else {}
+    # modelとtokenizerはpipelineの外で定義しないと、正確に動作しない。
+    model = AutoModelForCausalLM.from_pretrained(torch_dtype=torch.bfloat16, device_map="auto", **quantization_config, **config)
+    tokenizer = AutoTokenizer.from_pretrained(**config)
+    return pipeline("text-generation", model=model, tokenizer=tokenizer)
+
+def has_word(prompt:str, word:str) -> bool:
     pattern = rf"(^|,\s*){word}($|\s*,)"
     return bool(re.search(pattern, prompt))
 
-def has_any_words(prompt: str, words: tuple[str, ...]) -> bool:
+def has_any_words(prompt:str, words:tuple[str, ...]) -> bool:
     pattern = rf"(^|,\s*)({'|'.join(words)})($|\s*,)"
     return bool(re.search(pattern, prompt))

@@ -17,7 +17,7 @@ class NormalizePromptNode:
         return {
             "required": {
                 "raw_prompt": ("STRING", {"forceInput": True}),
-                "translation_engine": (["None", "textgen", "Google"], {"default": "None"})
+                "translation_engine": ([e.value for e in TranslateEngine], {"default": TranslateEngine.NONE})
             }
         }
     RETURN_TYPES = ("STRING",)
@@ -41,10 +41,14 @@ class NormalizePromptNode:
             prompt = re.sub(r"( *,+\s*)+", ", ", prompt)
             #先頭・末尾の余分なカンマを除去
             prompt = re.sub(r"(^, |, $)", "", prompt)
-            prompt = translate_bracketed_text(prompt, translation_engine).strip()
+            engine = TranslateEngine(translation_engine)
+            if engine != TranslateEngine.NONE:
+                prompt = self.translate_bracketed_text(prompt, engine).strip()
             return (prompt,)
         return (raw_prompt,)
 
+    def translate_bracketed_text(self, prompt: str, engine:TranslateEngine) -> str:
+        return re.sub(r"「\s*([^」]*)\s*」", lambda m: translate_to_english(m.group(1), engine), prompt)
 
 class AnalyzePromptNode:
     @classmethod
@@ -188,7 +192,8 @@ class PromptToFileNameNode:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "prompt": ("STRING", {"forceInput": True})
+                "prompt": ("STRING", {"forceInput": True}),
+                "max_length": ("INT", {"default": 160, "min": 20, "max": 260}),
             }
         }
     RETURN_TYPES = ("STRING",)
@@ -197,11 +202,12 @@ class PromptToFileNameNode:
     OUTPUT_NODE = False
     CATEGORY = CATEGORY_PROMPT
 
-    def run(self, prompt:str):
+    def run(self, prompt:str, max_length=160):
         if prompt:
             result = prompt.replace(", ", ",")
             result = re.sub(r'[\\/:*?"<>|\n\r\t]', "_", result, flags=re.MULTILINE)
-            result = result[:160]
+            # 変数埋め込み後のフルパスがWindows制限(260)を超えないよう、ある程度の長さで切り捨てる。
+            result = result[:max_length]
             result = re.sub("\\.+$", "_", result)
             return (result,)
         return ("ComfyUI",)
