@@ -2,7 +2,7 @@ import base64,re,requests,fast_langdetect,os,torch
 import numpy as np
 import folder_paths
 from enum import StrEnum
-from transformers import pipeline,AutoModelForCausalLM,AutoTokenizer
+from transformers import pipeline,AutoModelForCausalLM,AutoTokenizer,BitsAndBytesConfig
 from functools import lru_cache
 from urllib.parse import quote
 from io import BytesIO
@@ -107,11 +107,16 @@ def unpack_list(any_list):
     # 「複数の画像を処理する」ノードなら、リストのまま扱うべき局面もあります。
     return any_list[0] if len(any_list) > 0 else any_list
 
+LLM_COMMAND_JP = "あなたは画像生成プロンプトの専門翻訳家です。ユーザーが入力した文章を、文脈を維持したまま自然な英語に翻訳してください。余計な形容詞や説明は付け足さず、プロンプトの構成要素を忠実に変換することに集中してください。"
+LLM_COMMAND_EN = "You are a literal translator for image generation prompts. Translate the input accurately into English, keeping the structure and technical terms as they are. Do not add any descriptive words or change the style."
+LLM_COMMAND_CH = "你是一位图像生成提示词的直译专家。请将用户输入准确翻译为英文，保持原有的结构和专业词汇，禁止进行任何描述性的添加或风格修改。"
 class TranslateEngine(StrEnum):
     NONE = ("None", False,)
-    # https://github.com/Tencent-Hunyuan/Hy-MT2
-    HY_MT2 =("tencent/Hy-MT2-1.8B", True, False, "你是一位专业的翻译官。请将用户的输入翻译成地道的英语。")
-    #TRANSLATE_GEMMA="google/translategemma-4b-it" # 規約同意が必要なためカスタムノードには向かない
+    CAT_TRANSLATE = ("CyberAgent/CAT-Translate-0.8b", True, True, LLM_COMMAND_EN)
+    # SHISA_21_LFM = ("shisa-ai/shisa-v2.1-lfm2-1.2b", True, True, LLM_COMMAND_JP) # 余計な翻訳ノートが頑固すぎて消せない
+    QWEN_25 =("Qwen/Qwen2.5-1.5B-Instruct", True, True, LLM_COMMAND_EN)
+    HY_MT2 =("tencent/Hy-MT2-1.8B", True, True, LLM_COMMAND_CH)
+    # TRANSLATE_GEMMA=("google/translategemma-4b-it", True, True, LLM_COMMAND_EN) # 規約同意が必要なためカスタムノードには向かない
     GOOGLE=("Google", False,)
 
     def __new__(cls, value:str, is_llm:bool=True, is_quantized:bool=False, prompt:str=None):
@@ -122,7 +127,7 @@ class TranslateEngine(StrEnum):
         obj.prompt = prompt
         return obj
 
-def translate_to_english(text:str, engine:TranslateEngine) -> str:
+def translate_to_english(engine:TranslateEngine, text:str, system_message:str="", temperature:float=0.1, top_p:float=0.9) -> str:
     if not text or not text.strip():
         return ""
     try:
@@ -131,23 +136,23 @@ def translate_to_english(text:str, engine:TranslateEngine) -> str:
             return text
         en = text
         if engine.is_llm:
-            en = translate_to_english_by_llm(engine, src_lang, text)
+            en = translate_to_english_by_llm(engine, src_lang, text, system_message, temperature, top_p)
         elif engine == TranslateEngine.GOOGLE:
             en = translate_to_english_by_google(text)
         logger.info(f"[GadgetNodes] '{text}' was translated as '{en}' by {engine}")
         return en
     except Exception as e:
-        logger.ex(f"[GadgetNodes] {engine} translation failed for '{text}': {e}")
+        logger.error(f"[GadgetNodes] {engine} translation failed for '{text}': {e}")
     return text
 
 @lru_cache(maxsize=100)
-def translate_to_english_by_llm(engine:TranslateEngine, src_lang:str, text:str) -> str:
+def translate_to_english_by_llm(engine:TranslateEngine, src_lang:str, text:str, system_message:str, temperature:float, top_p:float) -> str:
     engine_obj = get_translate_engine(engine, src_lang, "en")
     messages = [
-        {"role": "system", "content": engine.prompt},
+        {"role": "system", "content": system_message if system_message else engine.prompt},
         {"role": "user", "content": text}
     ]
-    result = engine_obj(messages, max_new_tokens=len(text) * 2, temperature=0.1)
+    result = engine_obj(messages, max_new_tokens=len(text) * 2, temperature=temperature, top_p=top_p)
     return result[0]['generated_text'][-1]['content']
 
 @lru_cache(maxsize=100)
@@ -179,16 +184,17 @@ def get_translate_engine(engine:TranslateEngine, src_lang:str, tgt_lang:str):
         "pretrained_model_name_or_path": engine,
         "cache_dir": LLM_DIR,
         "trust_remote_code": True,
+        # 稀にダウンロード失敗してフォルダだけ出来てしまうケースもあるため、下記は入れるべきか悩ましい。
         "local_files_only": os.path.exists(os.path.join(LLM_DIR, f"models--{engine.replace('/', '--')}")),
     }
-    quantization_config = {
-        "load_in_4bit": True,
-        "bnb_4bit_compute_dtype": torch.bfloat16,
-        "bnb_4bit_quant_type": "nf4",
-        "bnb_4bit_use_double_quant": True,
-    } if engine.is_quantized else {}
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_compute_dtype=torch.bfloat16,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_use_double_quant=True,
+    ) if engine.is_quantized else None
     # modelとtokenizerはpipelineの外で定義しないと、正確に動作しない。
-    model = AutoModelForCausalLM.from_pretrained(torch_dtype=torch.bfloat16, device_map="auto", **quantization_config, **config)
+    model = AutoModelForCausalLM.from_pretrained(torch_dtype=torch.bfloat16, device_map="auto", quantization_config=bnb_config, **config)
     tokenizer = AutoTokenizer.from_pretrained(**config)
     return pipeline("text-generation", model=model, tokenizer=tokenizer)
 

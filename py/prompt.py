@@ -26,7 +26,7 @@ class NormalizePromptNode:
     OUTPUT_NODE = False
     CATEGORY = CATEGORY_PROMPT
 
-    def run(self, raw_prompt:str, translation_engine:str="None"):
+    def run(self, raw_prompt:str, translation_engine:str=TranslateEngine.NONE):
         if raw_prompt:
             # コメントアウトを除去
             prompt = re.sub(r"/\*.*?\*/", "", raw_prompt, flags=re.DOTALL)
@@ -43,12 +43,40 @@ class NormalizePromptNode:
             prompt = re.sub(r"(^, |, $)", "", prompt)
             engine = TranslateEngine(translation_engine)
             if engine != TranslateEngine.NONE:
-                prompt = self.translate_bracketed_text(prompt, engine).strip()
+                prompt = self.translate_bracketed_text(engine, prompt).strip()
             return (prompt,)
         return (raw_prompt,)
 
-    def translate_bracketed_text(self, prompt: str, engine:TranslateEngine) -> str:
-        return re.sub(r"「\s*([^」]*)\s*」", lambda m: translate_to_english(m.group(1), engine), prompt)
+    def translate_bracketed_text(self, engine:TranslateEngine, prompt:str) -> str:
+        return re.sub(r"「\s*([^」]*)\s*」", lambda m: translate_to_english(engine, m.group(1)), prompt)
+
+class TranslatePromptNode:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "translation_engine": ([e.value for e in TranslateEngine], {"default": TranslateEngine.NONE}),
+                "temperature": ("FLOAT", {"default": 0.1, "min": 0.05, "max": 1.0, "step": 0.05}),
+                "top_p": ("FLOAT", {"default": 0.9, "min": 0.0, "max": 1.0, "step": 0.05}),
+            },
+            "optional": {
+                "system_message": ("STRING", {"multiline": True}),
+                "raw_prompt": ("STRING", {"multiline": True}),
+                "translated_prompt": ("STRING", {"multiline": True}),
+            }
+        }
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("prompt",)
+    FUNCTION = "run"
+    OUTPUT_NODE = True
+    CATEGORY = CATEGORY_PROMPT
+
+    def run(self, translation_engine:str="None", temperature:float=0.1, top_p:float=0.9, system_message="", raw_prompt:str="", translated_prompt=""):
+        if raw_prompt:
+            engine = TranslateEngine(translation_engine)
+            if engine != TranslateEngine.NONE:
+                return (translate_to_english(engine, raw_prompt, system_message, temperature, top_p).strip(),)
+        return (raw_prompt,)
 
 class AnalyzePromptNode:
     @classmethod

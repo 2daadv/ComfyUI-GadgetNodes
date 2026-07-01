@@ -7,6 +7,7 @@ from .py.train import *
 
 NODE_CLASS_MAPPINGS = {
     "Normalize Prompt": NormalizePromptNode,
+    "Translate Prompt": TranslatePromptNode,
     "Analyze Prompt": AnalyzePromptNode,
     "Split Prompt": SplitPromptNode,
     "Expand Wildcards": ExpandWildcardsNode,
