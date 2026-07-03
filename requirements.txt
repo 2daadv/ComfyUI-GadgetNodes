@@ -1,5 +1,2 @@
 dynamicprompts==0.31.0
-transformers
-sentencepiece
-bitsandbytes
-fast-langdetect
+requests

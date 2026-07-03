@@ -17,7 +17,7 @@ class NormalizePromptNode:
         return {
             "required": {
                 "raw_prompt": ("STRING", {"forceInput": True}),
-                "translation_engine": ([e.value for e in TranslateEngine], {"default": TranslateEngine.NONE})
+                "translation_engine": (get_translation_engines(), {"default": "None"})
             }
         }
     RETURN_TYPES = ("STRING",)
@@ -26,7 +26,7 @@ class NormalizePromptNode:
     OUTPUT_NODE = False
     CATEGORY = CATEGORY_PROMPT
 
-    def run(self, raw_prompt:str, translation_engine:str=TranslateEngine.NONE):
+    def run(self, raw_prompt:str, translation_engine:str="None"):
         if raw_prompt:
             # コメントアウトを除去
             prompt = re.sub(r"/\*.*?\*/", "", raw_prompt, flags=re.DOTALL)
@@ -41,22 +41,21 @@ class NormalizePromptNode:
             prompt = re.sub(r"( *,+\s*)+", ", ", prompt)
             #先頭・末尾の余分なカンマを除去
             prompt = re.sub(r"(^, |, $)", "", prompt)
-            engine = TranslateEngine(translation_engine)
-            if engine != TranslateEngine.NONE:
-                prompt = self.translate_bracketed_text(engine, prompt).strip()
+            if translation_engine != "None":
+                prompt = self.translate_bracketed_text(translation_engine, prompt).strip()
             return (prompt,)
         return (raw_prompt,)
 
-    def translate_bracketed_text(self, engine:TranslateEngine, prompt:str) -> str:
-        return re.sub(r"「\s*([^」]*)\s*」", lambda m: translate_to_english(engine, m.group(1)), prompt)
+    def translate_bracketed_text(self, translation_engine:str, prompt:str) -> str:
+        return re.sub(r"「\s*([^」]*)\s*」", lambda m: translate_to_english(translation_engine, m.group(1)), prompt)
 
 class TranslatePromptNode:
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required": {
-                "translation_engine": ([e.value for e in TranslateEngine], {"default": TranslateEngine.NONE}),
-                "temperature": ("FLOAT", {"default": 0.1, "min": 0.05, "max": 1.0, "step": 0.05}),
+                "translation_engine": (get_translation_engines(), {"default": "None"}),
+                "temperature": ("FLOAT", {"default": 0.1, "min": 0.0, "max": 1.0, "step": 0.05}),
                 "top_p": ("FLOAT", {"default": 0.9, "min": 0.0, "max": 1.0, "step": 0.05}),
             },
             "optional": {
@@ -72,11 +71,7 @@ class TranslatePromptNode:
     CATEGORY = CATEGORY_PROMPT
 
     def run(self, translation_engine:str="None", temperature:float=0.1, top_p:float=0.9, system_message="", raw_prompt:str="", translated_prompt=""):
-        if raw_prompt:
-            engine = TranslateEngine(translation_engine)
-            if engine != TranslateEngine.NONE:
-                return (translate_to_english(engine, raw_prompt, system_message, temperature, top_p).strip(),)
-        return (raw_prompt,)
+        return (translate_to_english(translation_engine, raw_prompt, system_message, temperature, top_p).strip(),)
 
 class AnalyzePromptNode:
     @classmethod
