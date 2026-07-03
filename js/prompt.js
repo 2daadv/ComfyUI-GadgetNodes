@@ -1,5 +1,248 @@
 import { app } from "/scripts/app.js";
+import { api } from "/scripts/api.js";
 import { $el } from "/scripts/ui.js";
+
+function walkGraph(graph, callback) {
+    for (const node of graph._nodes ?? graph.nodes ?? []) {
+        callback(node, graph);
+        if (node.subgraph) walkGraph(node.subgraph, callback);
+    }
+}
+
+function findNodeByExecutionId(rootGraph, executionId) {
+    if (!rootGraph || executionId == null) return null;
+    const parts = String(executionId).split(":");
+    let graph = rootGraph;
+    let node = null;
+    for (let i = 0; i < parts.length; i++) {
+        const id = Number(parts[i]);
+        node =
+            graph.getNodeById?.(id) ??
+            graph._nodes_by_id?.[id] ??
+            graph.nodes?.find((n) => n.id === id);
+        if (!node) return null;
+        if (i < parts.length - 1) {
+            if (!node.subgraph) return null;
+            graph = node.subgraph;
+        }
+    }
+    return node;
+}
+
+function findNodeForWidget(graph, widget) {
+    for (const node of graph._nodes ?? graph.nodes ?? []) {
+        if (node.widgets?.includes(widget)) return node;
+    }
+    return null;
+}
+
+function getConnectedInteriorWidgets(subgraphNode, promotedWidget) {
+    const inputName = promotedWidget?.name;
+    if (!inputName || !subgraphNode?.subgraph?.inputNode?.slots) return [];
+    const subgraphInput = subgraphNode.subgraph.inputNode.slots.find((s) => s.name === inputName);
+    return subgraphInput?.getConnectedWidgets?.() ?? [];
+}
+
+function isRawPromptPromotedWidget(subgraphNode, promotedWidget) {
+    return getConnectedInteriorWidgets(subgraphNode, promotedWidget).some((w) => w.name === "raw_prompt");
+}
+
+function findPromotedWidgetForInterior(subgraphNode, interiorNode, widgetName) {
+    if (!subgraphNode?.subgraph) return null;
+    const interiorWidget = interiorNode.widgets?.find((w) => w.name === widgetName);
+    if (!interiorWidget) return null;
+    for (const pw of subgraphNode.widgets ?? []) {
+        const connected = getConnectedInteriorWidgets(subgraphNode, pw);
+        if (connected.includes(interiorWidget)) return pw;
+    }
+    return subgraphNode.widgets?.find((w) => w.name === widgetName) ?? null;
+}
+
+function applyWidgetValue(node, widgetOrName, value) {
+    const widget =
+        typeof widgetOrName === "string"
+            ? node.widgets?.find((w) => w.name === widgetOrName)
+            : widgetOrName;
+    if (!widget) return false;
+    widget.value = value;
+    if (widget.inputEl) widget.inputEl.value = value;
+    node.onResize?.(node.size);
+    node.setDirtyCanvas?.(true, true);
+    return true;
+}
+
+function updateTranslatedPrompt(interiorNode, value, displayNode) {
+    applyWidgetValue(interiorNode, "translated_prompt", value);
+    if (!displayNode || displayNode === interiorNode) return;
+    const promoted = findPromotedWidgetForInterior(displayNode, interiorNode, "translated_prompt");
+    if (promoted) {
+        applyWidgetValue(displayNode, promoted, value);
+    } else {
+        applyWidgetValue(displayNode, "translated_prompt", value);
+    }
+}
+
+function getTranslatePromptParams(interiorNode) {
+    const get = (name) => interiorNode.widgets?.find((w) => w.name === name)?.value;
+    return {
+        translation_engine: get("translation_engine") ?? "None",
+        temperature: get("temperature") ?? 0.1,
+        top_p: get("top_p") ?? 0.9,
+        system_message: get("system_message") ?? "",
+    };
+}
+
+async function requestTranslation(rawText, params) {
+    const resp = await api.fetchApi("/gadget_nodes/prompt/translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            raw_prompt: rawText,
+            ...params,
+        }),
+    });
+    const data = await resp.json();
+    return data.translated_prompt ?? rawText;
+}
+
+async function handleRawPromptTranslate(e, context) {
+    if (!(e.key === "Enter" && (e.ctrlKey || e.metaKey))) return;
+    e.stopPropagation();
+    e.preventDefault();
+
+    const { interiorNode, displayNode, rawPromptWidget } = context;
+    const params = getTranslatePromptParams(interiorNode);
+    if (params.translation_engine === "None") return;
+
+    const rawText = rawPromptWidget.inputEl?.value ?? rawPromptWidget.value ?? "";
+    updateTranslatedPrompt(interiorNode, "Translating...", displayNode);
+
+    try {
+        const translated = await requestTranslation(rawText, params);
+        updateTranslatedPrompt(interiorNode, translated, displayNode);
+    } catch (err) {
+        console.error("[Gadget.TranslatePrompt] translate failed:", err);
+        updateTranslatedPrompt(interiorNode, rawText, displayNode);
+    }
+}
+
+function attachRawPromptKeydown(rawWidget, interiorNode, displayNode) {
+    if (!rawWidget || rawWidget._gadgetTranslateBound) return;
+    rawWidget._gadgetTranslateBound = true;
+
+    const bind = () => {
+        const el = rawWidget.inputEl;
+        if (!el || el._gadgetTranslateBound) return;
+        el._gadgetTranslateBound = true;
+        el.addEventListener("keydown", (e) => {
+            handleRawPromptTranslate(e, {
+                interiorNode,
+                displayNode: displayNode ?? interiorNode,
+                rawPromptWidget: rawWidget,
+            });
+        });
+    };
+
+    bind();
+    setTimeout(bind, 100);
+    setTimeout(bind, 500);
+}
+
+function bindPromotedRawPrompt(subgraphNode, promotedWidget) {
+    if (!isRawPromptPromotedWidget(subgraphNode, promotedWidget)) return;
+    for (const iw of getConnectedInteriorWidgets(subgraphNode, promotedWidget)) {
+        if (iw.name !== "raw_prompt") continue;
+        const interiorNode = findNodeForWidget(subgraphNode.subgraph, iw);
+        if (interiorNode?.comfyClass !== TRANSLATE_NODE_CLASS) continue;
+        attachRawPromptKeydown(promotedWidget, interiorNode, subgraphNode);
+    }
+}
+
+function setupSubgraphPromotionListeners(subgraphNode) {
+    if (!subgraphNode?.subgraph || subgraphNode._gadgetPromoBound) return;
+    subgraphNode._gadgetPromoBound = true;
+
+    const controller = new AbortController();
+    subgraphNode._gadgetPromoAbort = controller;
+
+    subgraphNode.subgraph.events.addEventListener(
+        "widget-promoted",
+        (e) => {
+            bindPromotedRawPrompt(e.detail.subgraphNode, e.detail.widget);
+        },
+        { signal: controller.signal }
+    );
+
+    for (const w of subgraphNode.widgets ?? []) {
+        bindPromotedRawPrompt(subgraphNode, w);
+    }
+
+    const prevRemoved = subgraphNode.onRemoved;
+    subgraphNode.onRemoved = function () {
+        controller.abort();
+        prevRemoved?.apply(this, arguments);
+    };
+}
+
+function setupAllSubgraphPromotionListeners() {
+    walkGraph(app.graph, (node) => {
+        if (node.subgraph) setupSubgraphPromotionListeners(node);
+    });
+}
+
+function handleExecutedOutput(detail) {
+    const output = detail?.output;
+    if (!output?.translated_prompt) return;
+
+    const value = output.translated_prompt[0];
+    const interiorNode = findNodeByExecutionId(app.graph, detail.node);
+    if (interiorNode?.comfyClass !== TRANSLATE_NODE_CLASS) return;
+
+    const displayNode =
+        detail.display_node != null && String(detail.display_node) !== String(detail.node)
+            ? findNodeByExecutionId(app.graph, detail.display_node)
+            : interiorNode;
+
+    updateTranslatedPrompt(interiorNode, value, displayNode);
+}
+
+app.registerExtension({
+    name: "Gadget.TranslatePrompt",
+    async setup() {
+        api.addEventListener("executed", ({ detail }) => {
+            handleExecutedOutput(detail);
+        });
+    },
+    async afterConfigureGraph() {
+        setupAllSubgraphPromotionListeners();
+    },
+    async nodeCreated(node) {
+        if (node.subgraph) setupSubgraphPromotionListeners(node);
+    },
+    async beforeRegisterNodeDef(nodeType, nodeData) {
+        if (nodeData.name !== "Translate Prompt") return;
+
+        const prevOnExecuted = nodeType.prototype.onExecuted;
+        nodeType.prototype.onExecuted = function (message) {
+            prevOnExecuted?.apply(this, arguments);
+            const value = message?.translated_prompt?.[0];
+            if (value !== undefined) {
+                updateTranslatedPrompt(this, value, this);
+            }
+        };
+
+        const prevOnNodeCreated = nodeType.prototype.onNodeCreated;
+        nodeType.prototype.onNodeCreated = function () {
+            prevOnNodeCreated?.apply(this, arguments);
+
+            const node = this;
+            const rawWidget = node.widgets?.find((w) => w.name === "raw_prompt");
+            if (rawWidget) {
+                attachRawPromptKeydown(rawWidget, node, node);
+            }
+        };
+    },
+});
 
 app.registerExtension({
     name: "Gadget.PromptPalette",
@@ -181,3 +424,4 @@ app.registerExtension({
         };
     }
 });
+

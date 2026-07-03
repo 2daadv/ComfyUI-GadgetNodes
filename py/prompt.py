@@ -71,7 +71,28 @@ class TranslatePromptNode:
     CATEGORY = CATEGORY_PROMPT
 
     def run(self, translation_engine:str="None", temperature:float=0.1, top_p:float=0.9, system_message="", raw_prompt:str="", translated_prompt=""):
-        return (translate_to_english(translation_engine, raw_prompt, system_message, temperature, top_p).strip(),)
+        translated_prompt = translate_to_english(translation_engine, raw_prompt, system_message, temperature, top_p).strip()
+        return {
+            "ui": {"translated_prompt": (translated_prompt,)},
+            "result": (translated_prompt,),
+        }
+
+@PromptServer.instance.routes.post("/gadget_nodes/prompt/translate")
+async def translate_prompt_api(request):
+    data = await request.json()
+    raw_prompt = data.get("raw_prompt", "")
+    try:
+        translated = translate_to_english(
+            data.get("translation_engine", "None"),
+            raw_prompt,
+            data.get("system_message", ""),
+            float(data.get("temperature", 0.1)),
+            float(data.get("top_p", 0.9)),
+        ).strip()
+        return web.json_response({"translated_prompt": translated})
+    except:
+        logger.exception("[GadgetNodes] translate API failed.")
+        return web.json_response({"translated_prompt": raw_prompt})
 
 class AnalyzePromptNode:
     @classmethod
@@ -251,7 +272,6 @@ class PromptPaletteNode:
 
     def run(self, file_name):
         return ()
-
 
 @PromptServer.instance.routes.get("/gadget_nodes/prompt/get_prompts")
 async def get_prompts(request):
