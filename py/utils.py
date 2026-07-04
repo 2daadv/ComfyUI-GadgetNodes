@@ -146,16 +146,18 @@ def get_translation_engines():
         data = response.json()
         new_cache = {}
         for m in data.get("models", []):
-            name = m["name"]
-            parameter_size = parse_parameter_size(m.get("details", {}).get("parameter_size", "0B"))
-            if parameter_size < 1000: spec = "low"
-            elif parameter_size < 3000: spec = "middle"
-            else: spec = "high"
-            new_cache[name] = OllamaModel(
-                name=name,
-                is_thinking="thinking" in m.get("capabilities", []),
-                parameter_spec=spec
-            )
+            capabilities = m.get("capabilities", [])
+            if "completion" in capabilities:
+                name = m["name"]
+                parameter_size = parse_parameter_size(m.get("details", {}).get("parameter_size", "0B"))
+                if parameter_size < 1000: spec = "low"
+                elif parameter_size < 3000: spec = "middle"
+                else: spec = "high"
+                new_cache[name] = OllamaModel(
+                    name=name,
+                    is_thinking="thinking" in capabilities,
+                    parameter_spec=spec
+                )
         global ollama_models
         ollama_models = new_cache
         logger.info(f"[GadgetNodes] {str(ollama_models)}")
