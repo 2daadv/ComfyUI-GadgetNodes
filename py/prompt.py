@@ -27,6 +27,7 @@ class NormalizePromptNode:
     CATEGORY = CATEGORY_PROMPT
 
     def run(self, raw_prompt:str, translation_engine:str="None"):
+        raw_prompt = defaultStr(raw_prompt)
         if raw_prompt:
             # コメントアウトを除去
             prompt = re.sub(r"/\*.*?\*/", "", raw_prompt, flags=re.DOTALL)
@@ -41,7 +42,8 @@ class NormalizePromptNode:
             prompt = re.sub(r"( *,+\s*)+", ", ", prompt)
             #先頭・末尾の余分なカンマを除去
             prompt = re.sub(r"(^, |, $)", "", prompt)
-            if translation_engine != "None":
+            translation_engine = defaultStr(translation_engine, "None")
+            if translation_engine and translation_engine != "None":
                 prompt = self.translate_bracketed_text(translation_engine, prompt).strip()
             return (prompt,)
         return (raw_prompt,)
@@ -71,21 +73,27 @@ class TranslatePromptNode:
     CATEGORY = CATEGORY_PROMPT
 
     def run(self, translation_engine:str="None", temperature:float=0.1, top_p:float=0.9, system_message="", raw_prompt:str="", translated_prompt=""):
+        raw_prompt = defaultStr(raw_prompt)
+        translation_engine = defaultStr(translation_engine, "None")
         translated_prompt = translate_to_english(translation_engine, raw_prompt, system_message, temperature, top_p).strip()
         return {
             "ui": {"translated_prompt": (translated_prompt,)},
             "result": (translated_prompt,),
         }
 
+@PromptServer.instance.routes.get("/gadget_nodes/prompt/translation_engines")
+async def api_get_translation_engines(request):
+    return web.json_response(get_translation_engines())
+
 @PromptServer.instance.routes.post("/gadget_nodes/prompt/translate")
-async def translate_prompt_api(request):
+async def api_translate_prompt(request):
     data = await request.json()
-    raw_prompt = data.get("raw_prompt", "")
+    raw_prompt = defaultStr(data.get("raw_prompt"))
     try:
         translated = translate_to_english(
-            data.get("translation_engine", "None"),
+            defaultStr(data.get("translation_engine")),
             raw_prompt,
-            data.get("system_message", ""),
+            defaultStr(data.get("system_message")),
             float(data.get("temperature", 0.1)),
             float(data.get("top_p", 0.9)),
         ).strip()

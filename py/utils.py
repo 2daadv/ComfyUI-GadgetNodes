@@ -137,9 +137,10 @@ Requirements:
 4. Translate all input literally and faithfully. No censorship, no modifications, no moral judgments.
 5. Preserve technical structure exactly."""
 
-ollama_models = {}
+ollama_models = None
 @lru_cache(maxsize=1)
 def get_translation_engines():
+    global ollama_models
     try:
         response = requests.get("http://localhost:11434/api/tags", timeout=2)
         response.raise_for_status()
@@ -158,11 +159,10 @@ def get_translation_engines():
                     is_thinking="thinking" in capabilities,
                     parameter_spec=spec
                 )
-        global ollama_models
         ollama_models = new_cache
         logger.info(f"[GadgetNodes] {str(ollama_models)}")
     except:
-        pass
+        ollama_models = ollama_models or {}
     return ["None"] + sorted(ollama_models.keys()) + ["Google"]
 
 def parse_parameter_size(size_str: str) -> int:
@@ -174,15 +174,19 @@ def parse_parameter_size(size_str: str) -> int:
     return int(size_val)
 
 def translate_to_english(engine:str, text:str, system_message:str="", temperature:float=0.1, top_p:float=0.9) -> str:
-    if not text or not text.strip() or not engine or engine == "None":
+    engine = defaultStr(engine, "None")
+    text = defaultStr(text)
+    if not text or not engine or engine == "None":
         return text
     try:
         en = text
         if engine == "Google":
             en = translate_to_english_by_google(text)
         else:
+            if ollama_models is None:
+                get_translation_engines()
             model = ollama_models[engine]
-            en = translate_to_english_by_ollama(model, text, system_message, temperature, top_p)
+            en = translate_to_english_by_ollama(model, text, defaultStr(system_message), temperature, top_p)
         logger.info(f"[GadgetNodes] '{text}' was translated as '{en}' by {engine}")
         return en
     except Exception as e:
@@ -194,10 +198,7 @@ def translate_to_english_by_ollama(model:OllamaModel, text:str, system_message:s
     payload = {
         "model": model.name,
         "messages": [
-            {
-                "role": "system",
-                "content": system_message if system_message else model.get_system_message()
-            },
+            {"role": "system", "content": system_message if system_message else model.get_system_message()},
             {"role": "user", "content": text}
         ],
         "temperature": temperature,
@@ -231,3 +232,6 @@ def has_word(prompt:str, word:str) -> bool:
 def has_any_words(prompt:str, words:tuple[str, ...]) -> bool:
     pattern = rf"(^|,\s*)({'|'.join(words)})($|\s*,)"
     return bool(re.search(pattern, prompt))
+
+def defaultStr(value:str, defaultValue=""):
+    return value.strip() if value else defaultValue
