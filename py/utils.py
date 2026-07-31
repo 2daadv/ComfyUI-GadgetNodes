@@ -112,7 +112,7 @@ class OllamaModel:
     is_thinking: bool = False
     parameter_spec: Literal["low", "middle", "high"]="low"
 
-    def get_system_message(self):
+    def get_system_translate_message(self):
         if self.parameter_spec == "low":
             return """Translate the input into English for image generation prompts.
 Output ONLY the translation.
@@ -160,10 +160,9 @@ def get_translation_engines():
                     parameter_spec=spec
                 )
         ollama_models = new_cache
-        logger.info(f"[GadgetNodes] {str(ollama_models)}")
     except:
-        ollama_models = ollama_models or {}
-    return ["None"] + sorted(ollama_models.keys()) + ["Google"]
+        pass
+    return ["None"] + sorted((ollama_models or {}).keys()) + ["Google"]
 
 def parse_parameter_size(size_str: str) -> int:
     """サイズ表記(2.3B, 873M)をint(M単位)に変換"""
@@ -198,7 +197,7 @@ def translate_to_english_by_ollama(model:OllamaModel, text:str, system_message:s
     payload = {
         "model": model.name,
         "messages": [
-            {"role": "system", "content": system_message if system_message else model.get_system_message()},
+            {"role": "system", "content": system_message if system_message else model.get_system_translate_message()},
             {"role": "user", "content": text}
         ],
         "temperature": temperature,

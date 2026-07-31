@@ -11,6 +11,13 @@ CATEGORY_PROMPT = "Gadget/prompt"
 PROMPT_PATH = BASE_DIR / "prompt"
 PROMPT_PATH.mkdir(parents=True, exist_ok=True)
 
+#### TODO ##################################################################################################################################
+# translation_engineに前回値が指定された状態で、モデルが存在しない／Ollama停止中 などの状況でJOB実行時に翻訳対象がなくてもエラーを吐く。
+# 上記エラーを抑制するには、型をリストからSTRINGにする必要がある。
+# ただし、そのままでは不便なためjs側で入力補完や選択可能な候補のリスト表示・選択が出来ることが望ましい。
+# 比較的難易度が高いようで、Geminiだと解決できなかったため、Cursorでやりたい。
+############################################################################################################################################
+
 class NormalizePromptNode:
     @classmethod
     def INPUT_TYPES(s):
@@ -35,16 +42,19 @@ class NormalizePromptNode:
             prompt = re.sub(r"#.*$", "", prompt, flags=re.MULTILINE)
 
             #各行の先頭・末尾の空白除去
-            prompt = re.sub(r"(^ +| +$)", "", prompt, flags=re.MULTILINE)
+            prompt = re.sub(r"(^[ \t]+|[ \t]+$)", "", prompt, flags=re.MULTILINE)
             #改行を消して1行に連結
-            prompt = re.sub(r"\n\n+", " ", prompt)
+            prompt = re.sub(r"(\r?\n)+", " ", prompt)
             #連続するカンマや、前後に空白のあるカンマをカンマ+空白にする
-            prompt = re.sub(r"( *,+\s*)+", ", ", prompt)
+            prompt = re.sub(r"(\s*,+\s*)+", ", ", prompt)
+            #ピリオドの直前が数字ではない場合のみ、ピリオドの直後に空白がない場合にスペースを挿入
+            prompt = re.sub(r"(?<!\d)\.(?=\S)", ". ", prompt)
             #先頭・末尾の余分なカンマを除去
             prompt = re.sub(r"(^, |, $)", "", prompt)
             translation_engine = defaultStr(translation_engine, "None")
             if translation_engine and translation_engine != "None":
                 prompt = self.translate_bracketed_text(translation_engine, prompt).strip()
+            logger.info(f"[GadgetNodes] Normalized: {prompt}")
             return (prompt,)
         return (raw_prompt,)
 
