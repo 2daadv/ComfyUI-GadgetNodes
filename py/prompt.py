@@ -2,6 +2,7 @@ from __future__ import annotations
 import re,os,yaml,subprocess
 import folder_paths
 from .utils import *
+from datetime import datetime
 from aiohttp import web
 from server import PromptServer
 from dynamicprompts.generators.combinatorial import CombinatorialPromptGenerator
@@ -255,7 +256,9 @@ class PromptToFileNameNode:
         return {
             "required": {
                 "prompt": ("STRING", {"forceInput": True}),
-                "max_length": ("INT", {"default": 160, "min": 20, "max": 260}),
+                "file_name_format": ("STRING", {"default": "%time-%prompt"}),
+                "time_format": ("STRING", {"default": "%Y%m%d%H%M%S"}),
+                "max_length": ("INT", {"default": 175, "min": 20, "max": 260}),
             }
         }
     RETURN_TYPES = ("STRING",)
@@ -264,15 +267,27 @@ class PromptToFileNameNode:
     OUTPUT_NODE = False
     CATEGORY = CATEGORY_PROMPT
 
-    def run(self, prompt:str, max_length=160):
+    def run(self, prompt:str, file_name_format:str, time_format:str, max_length:int=175):
+        # 1. プロンプトのサニタイズ処理
+        clean_prompt = "ComfyUI"
         if prompt:
             result = prompt.replace(", ", ",")
+            # ファイル名に使えない文字や制御文字を置換
             result = re.sub(r'[\\/:*?"<>|\n\r\t]', "_", result, flags=re.MULTILINE)
-            # 変数埋め込み後のフルパスがWindows制限(260)を超えないよう、ある程度の長さで切り捨てる。
-            result = result[:max_length]
-            result = re.sub("\\.+$", "_", result)
-            return (result,)
-        return ("ComfyUI",)
+            clean_prompt = result
+
+        # 2. 現在時刻のフォーマット変換
+        current_time = datetime.now().strftime(time_format)
+        # 3. file_name_format 内のプレースホルダーを置換
+        filename = file_name_format.replace("%time", current_time).replace("%prompt", clean_prompt)
+
+        # 4. 全体の長さが max_length を超えないように切り捨て
+        if len(filename) > max_length:
+            filename = filename[:max_length]
+        # 末尾がドットで終わらないように調整
+        filename = re.sub(r"\.+$", "_", filename)
+
+        return (filename,)
 
 #=============================================================================
 class PromptPaletteNode:
