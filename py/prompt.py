@@ -46,6 +46,8 @@ class NormalizePromptNode:
             prompt = re.sub(r"(^[ \t]+|[ \t]+$)", "", prompt, flags=re.MULTILINE)
             #改行を消して1行に連結
             prompt = re.sub(r"(\r?\n)+", " ", prompt)
+            #連続する空白を1つに
+            prompt = re.sub(r" +", " ", prompt)
             #連続するカンマや、前後に空白のあるカンマをカンマ+空白にする
             prompt = re.sub(r"(\s*,+\s*)+", ", ", prompt)
             #ピリオドの直前が数字ではない場合のみ、ピリオドの直後に空白がない場合にスペースを挿入
