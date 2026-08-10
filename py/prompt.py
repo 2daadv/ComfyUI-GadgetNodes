@@ -25,7 +25,6 @@ class NormalizePromptNode:
         return {
             "required": {
                 "raw_prompt": ("STRING", {"forceInput": True}),
-                "translation_engine": (get_translation_engines(), {"default": "None"})
             }
         }
     RETURN_TYPES = ("STRING",)
@@ -34,7 +33,7 @@ class NormalizePromptNode:
     OUTPUT_NODE = False
     CATEGORY = CATEGORY_PROMPT
 
-    def run(self, raw_prompt:str, translation_engine:str="None"):
+    def run(self, raw_prompt:str):
         raw_prompt = defaultStr(raw_prompt)
         if raw_prompt:
             # コメントアウトを除去
@@ -54,15 +53,9 @@ class NormalizePromptNode:
             prompt = re.sub(r"(?<!\d)\.(?=\S)", ". ", prompt)
             #先頭・末尾の余分なカンマを除去
             prompt = re.sub(r"(^, |, $)", "", prompt)
-            translation_engine = defaultStr(translation_engine, "None")
-            if translation_engine and translation_engine != "None":
-                prompt = self.translate_bracketed_text(translation_engine, prompt).strip()
             logger.info(f"[GadgetNodes] Normalized: {prompt}")
             return (prompt,)
         return (raw_prompt,)
-
-    def translate_bracketed_text(self, translation_engine:str, prompt:str) -> str:
-        return re.sub(r"「\s*([^」]*)\s*」", lambda m: translate_to_english(translation_engine, m.group(1)), prompt)
 
 class TranslatePromptNode:
     @classmethod
@@ -80,15 +73,18 @@ class TranslatePromptNode:
             }
         }
     RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("prompt",)
+    RETURN_NAMES = ("translated_prompt",)
     FUNCTION = "run"
-    OUTPUT_NODE = True
+    OUTPUT_NODE = False
     CATEGORY = CATEGORY_PROMPT
 
     def run(self, translation_engine:str="None", temperature:float=0.1, top_p:float=0.9, system_message="", raw_prompt:str="", translated_prompt=""):
         raw_prompt = defaultStr(raw_prompt)
         translation_engine = defaultStr(translation_engine, "None")
-        translated_prompt = translate_to_english(translation_engine, raw_prompt, system_message, temperature, top_p).strip()
+        if "「" in raw_prompt and "」" in raw_prompt:
+            translated_prompt = translate_bracketed_text(translation_engine, raw_prompt, system_message, temperature, top_p).strip()
+        else:
+            translated_prompt = translate_to_english(translation_engine, raw_prompt, system_message, temperature, top_p).strip()
         return {
             "ui": {"translated_prompt": (translated_prompt,)},
             "result": (translated_prompt,),
@@ -102,14 +98,15 @@ async def api_get_translation_engines(request):
 async def api_translate_prompt(request):
     data = await request.json()
     raw_prompt = defaultStr(data.get("raw_prompt"))
+    translation_engine = defaultStr(data.get("translation_engine"))
+    system_message = defaultStr(data.get("system_message"))
+    temperature = float(data.get("temperature", 0.1))
+    top_p = float(data.get("top_p", 0.9))
     try:
-        translated = translate_to_english(
-            defaultStr(data.get("translation_engine")),
-            raw_prompt,
-            defaultStr(data.get("system_message")),
-            float(data.get("temperature", 0.1)),
-            float(data.get("top_p", 0.9)),
-        ).strip()
+        if "「" in raw_prompt and "」" in raw_prompt:
+            translated = translate_bracketed_text(translation_engine, raw_prompt, system_message, temperature, top_p).strip()
+        else:
+            translated = translate_to_english(translation_engine, raw_prompt, system_message, temperature, top_p).strip()
         return web.json_response({"translated_prompt": translated})
     except:
         logger.exception("[GadgetNodes] translate API failed.")

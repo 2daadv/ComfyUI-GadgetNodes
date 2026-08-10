@@ -224,6 +224,9 @@ def translate_to_english_by_google(text:str) -> str:
         return data[0][0]
     raise ValueError("Unsupported response data structure.")
 
+def translate_bracketed_text(translation_engine:str, prompt:str, system_message:str, temperature:float, top_p:float) -> str:
+    return re.sub(r"「\s*([^」]*)\s*」", lambda m: translate_to_english(translation_engine, m.group(1), system_message, temperature, top_p), prompt)
+
 def has_word(prompt:str, word:str) -> bool:
     pattern = rf"(^|,\s*){word}($|\s*,)"
     return bool(re.search(pattern, prompt))
