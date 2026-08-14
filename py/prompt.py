@@ -215,7 +215,7 @@ class ExpandWildcardsNode:
             return base_wildcard_path
 
         # 2. カスタムノード直下のwildcards
-        node_dir = Path(os.path.dirname(os.path.realpath(__file__)))
+        node_dir = Path(os.path.dirname(os.path.realpath(__file__))).parent
         node_wildcard_path = node_dir / "wildcards"
         node_wildcard_path.mkdir(parents=True, exist_ok=True)
 
