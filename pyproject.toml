@@ -9,5 +9,5 @@ dependencies = []
 Repository = "https://github.com/2daadv/ComfyUI-GadgetNodes"
 
 [tool.comfy]
-PublisherId = "2daadv"
+PublisherId = "dadadv"
 DisplayName = "ComfyUI-GadgetNodes"
