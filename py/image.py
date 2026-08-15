@@ -34,7 +34,7 @@ class ManualCropImagesNode:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "images": ("IMAGE",), 
+                "images": ("IMAGE",),
                 "aspect_ratio": (ASPECT_RATIO_OPTIONS, {"default": "1:1"}),
             },
             "hidden": {"unique_id": "UNIQUE_ID"}
@@ -97,7 +97,7 @@ class ManualCropImagesNode:
 
             output_list = []
             # 2回目のプログレスバー：切り抜き処理
-            pbar.update_absolute(0, total) 
+            pbar.update_absolute(0, total)
             for i in range(total):
                 if comfy.model_management.processing_interrupted():
                     return ([ExecutionBlocker(None)],)
@@ -191,7 +191,7 @@ class LoadImagesFromFolderNode:
                 img = Image.open(file_path)
                 img = ImageOps.exif_transpose(img) # 向きを補正
                 image = img.convert("RGB")
-                
+
                 # テンソル変換 [1, H, W, C]
                 image = np.array(image).astype(np.float32) / 255.0
                 image = torch.from_numpy(image)[None, :]
@@ -439,10 +439,14 @@ class ImageRefinerNode:
 
     def refine_images(self, images, median_enabled, median_radius, denoise_enabled, denoise_intensity, aa_enabled, aa_sigma, sharpen_enabled, sharpen_amount):
         # リスト入力の展開
-        m_en = unpack_list(median_enabled); m_r = unpack_list(median_radius)
-        d_en = unpack_list(denoise_enabled); d_i = unpack_list(denoise_intensity)
-        a_en = unpack_list(aa_enabled); a_s = unpack_list(aa_sigma)
-        s_en = unpack_list(sharpen_enabled); s_a = unpack_list(sharpen_amount)
+        m_en = unpack_list(median_enabled)
+        m_r = unpack_list(median_radius)
+        d_en = unpack_list(denoise_enabled)
+        d_i = unpack_list(denoise_intensity)
+        a_en = unpack_list(aa_enabled)
+        a_s = unpack_list(aa_sigma)
+        s_en = unpack_list(sharpen_enabled)
+        s_a = unpack_list(sharpen_amount)
 
         if not any([m_en, d_en, a_en, s_en]):
             return (flatten(images),)
