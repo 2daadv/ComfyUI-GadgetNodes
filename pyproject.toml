@@ -1,7 +1,7 @@
 [project]
 name = "ComfyUI-GadgetNodes"
 description = "Utility nodes for model, prompt, image, train, group, logic, etc."
-version = "1.0.0"
+version = "0.0.1"
 license = { file = "LICENSE" }
 dependencies = []
 
