@@ -1,0 +1,13 @@
+[project]
+name = "ComfyUI-GadgetNodes"
+description = "Utility Nodes for ComfyUI"
+version = "1.0.0"
+license = { file = "LICENSE" }
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/2daadv/ComfyUI-GadgetNodes"
+
+[tool.comfy]
+PublisherId = "2daadv"
+DisplayName = "ComfyUI-GadgetNodes"
