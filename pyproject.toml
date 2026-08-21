@@ -1,9 +1,15 @@
 [project]
 name = "ComfyUI-GadgetNodes"
-description = "A collection of utility nodes for ComfyUI to streamline workflows, including prompt editing, translation, model preset management, image preprocessing, and metadata editing."
 version = "0.0.1"
+description = "A collection of utility nodes for ComfyUI to streamline workflows, including prompt editing, translation, model preset management, image preprocessing, and metadata editing."
 license = { file = "LICENSE" }
-dependencies = []
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "dynamicprompts",
+    "requests",
+    "PyYAML",
+]
 
 [project.urls]
 Repository = "https://github.com/2daadv/ComfyUI-GadgetNodes"

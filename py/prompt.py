@@ -120,24 +120,28 @@ class AnalyzePromptNode:
                 "prompt": ("STRING", {"forceInput": True})
             }
         }
-    RETURN_TYPES = ("STRING", "BOOLEAN",)
-    RETURN_NAMES = ("prompt", "facedetailer_enabled",)
+    RETURN_TYPES = ("STRING", "BOOLEAN", "BOOLEAN",)
+    RETURN_NAMES = ("prompt", "facedetailer_enabled", "handrefiner_enabled",)
     FUNCTION = "run"
     OUTPUT_NODE = False
     CATEGORY = CATEGORY_PROMPT
 
     def run(self, prompt:str):
         facedetailer_enabled = False
+        handrefiner_enabled = False
         if prompt:
             facedetailer_enabled = "☹" in prompt
             if facedetailer_enabled:
                 prompt = prompt.replace("☹", "")
+            handrefiner_enabled = "✌" in prompt
+            if handrefiner_enabled:
+                prompt = prompt.replace("✌", "")
             if has_any_words(prompt, ("(nude|nipples?|pussy|anus|penis)", "(fellatio|irrumatio|deepthroat)", "(foot|hand|blow)job", "(sex|masturbation)")):
                 if not has_word(prompt, "explicit"):
                     prompt = prompt + ", explicit"
                 if not has_word(prompt, "uncensored"):
                     prompt = prompt + ", uncensored"
-        return (prompt, facedetailer_enabled,)
+        return (prompt, facedetailer_enabled, handrefiner_enabled,)
 
 class SplitPromptNode:
     @classmethod

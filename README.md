@@ -183,7 +183,7 @@ yellow
 |---|---|
 | **Normalize Prompt** | コメント（`/* */`, `<!-- -->`, `#`）除去、改行の正規化、カンマ・空白の整理を行い、1 行のプロンプトに整形します。 |
 | **Translate Prompt** ⚠️ | 日本語などの入力を英語プロンプトに翻訳します。`「…」` で囲まれた部分のみ翻訳するモードにも対応。`Ctrl+Enter`（Mac は `Cmd+Enter`）で UI 上から即時翻訳できます。 |
-| **Analyze Prompt** | プロンプトを解析します。`☹` が含まれると `facedetailer_enabled` を `True` にし、該当タグを除去します。特定の NSFW 関連語句がある場合、`explicit` / `uncensored` を自動付与します。 |
+| **Analyze Prompt** | プロンプトを解析します。`☹` や `✌` が含まれると `facedetailer_enabled` や `handrefiner_enabled` を `True` にし、該当タグを除去します。特定の NSFW 関連語句がある場合、`explicit` / `uncensored` を自動付与します。 |
 | **Split Prompt** | ポジティブ/ネガティブを分離します。`, -(tag)` 形式をネガティブとして抽出し、残りをポジティブとして出力します。 |
 | **Expand Wildcards** | dynamicprompts 形式のワイルドカードを組み合わせ展開し、プロンプトのリストを生成します。`max_variations` で上限、`auto_refresh` でファイル変更の再読み込みを制御します。 |
 | **Prompt To FileName** | プロンプトから保存用ファイル名を生成します。`%time`（`time_format` で書式指定）と `%prompt` プレースホルダに対応。 |
