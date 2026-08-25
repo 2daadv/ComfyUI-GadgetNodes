@@ -19,24 +19,6 @@ pip install -r ComfyUI-GadgetNodes/requirements.txt
 
 3. ComfyUI を再起動します。ノードはメニューの `Gadget/` カテゴリ以下に表示されます。
 
-## ComfyUI Nodes 2.0 について
-
-本パッケージの一部ノードは、`js/` 以下のフロントエンド拡張（`beforeRegisterNodeDef`、`addDOMWidget`、カスタムモーダル UI、キャンバス操作など）に依存しています。これらは **ComfyUI の従来 UI（LiteGraph ベース）向け** に実装されており、**Nodes 2.0（新フロントエンド）では正常に動作しない可能性** があります。
-
-| ノード | JS 依存の内容 | Nodes 2.0 での懸念 |
-|---|---|---|
-| **Translate Prompt** | `Ctrl+Enter` による即時翻訳、実行結果の UI 反映、サブグラフ連携 | ショートカット翻訳や UI 更新が効かない可能性。キュー実行自体は Python 側で動作 |
-| **Prompt Palette** | ツリー UI（`addDOMWidget`）、YAML 編集ボタン | カスタム UI が表示・操作できない可能性 |
-| **Load Checkpoint Preset** | モデル選択時の `models_config.yaml` 自動反映 | プリセット自動入力が効かない可能性。出力値の手動設定は可能 |
-| **Edit SD Lora Information** | メタデータ読込・Save ボタン、サムネイル描画 | 編集 UI・保存ボタン・プレビューが使えない可能性 |
-| **Edit SD Checkpoint Information** | 同上 | 同上 |
-| **Crop Images (Manual)** | 実行時のクロップダイアログ（モーダル UI） | **ダイアログが開かず実行が完了しない可能性が高い** |
-| **Select Image Indices** | 実行時の画像選択ダイアログ | **同上** |
-| **Edit Train Tags** | タグ編集 UI（`addDOMWidget`）、Save 操作 | カスタム UI が表示・操作できない可能性 |
-| **Virtual Group** | キャンバス上のノード折りたたみ/展開 | グループ化 UI が動作しない可能性。ワークフロー実行への影響はなし |
-
-JS 拡張を使わないノード（**Normalize Prompt**、**Split Prompt**、**Load Images From Folder** など）は、Nodes 2.0 でも概ね問題なく利用できる想定です。Nodes 2.0 利用時は、上記ノードの動作を個別に確認してください。
-
 ## 依存関係
 
 | パッケージ | 用途 |
@@ -293,6 +275,24 @@ dataset/
 ---
 
 ⚠️ = [ComfyUI Nodes 2.0 について](#comfyui-nodes-20-について) を参照。
+
+## ComfyUI Nodes 2.0 について
+
+本パッケージの一部ノードは、`js/` 以下のフロントエンド拡張（`beforeRegisterNodeDef`、`addDOMWidget`、カスタムモーダル UI、キャンバス操作など）に依存しています。これらは **ComfyUI の従来 UI（LiteGraph ベース）向け** に実装されており、**Nodes 2.0（新フロントエンド）では正常に動作しない可能性** があります。
+
+| ノード | JS 依存の内容 | Nodes 2.0 での懸念 |
+|---|---|---|
+| **Translate Prompt** | `Ctrl+Enter` による即時翻訳、実行結果の UI 反映、サブグラフ連携 | ショートカット翻訳や UI 更新が効かない可能性。キュー実行自体は Python 側で動作 |
+| **Prompt Palette** | ツリー UI（`addDOMWidget`）、YAML 編集ボタン | カスタム UI が表示・操作できない可能性 |
+| **Load Checkpoint Preset** | モデル選択時の `models_config.yaml` 自動反映 | プリセット自動入力が効かない可能性。出力値の手動設定は可能 |
+| **Edit SD Lora Information** | メタデータ読込・Save ボタン、サムネイル描画 | 編集 UI・保存ボタン・プレビューが使えない可能性 |
+| **Edit SD Checkpoint Information** | 同上 | 同上 |
+| **Crop Images (Manual)** | 実行時のクロップダイアログ（モーダル UI） | **ダイアログが開かず実行が完了しない可能性が高い** |
+| **Select Image Indices** | 実行時の画像選択ダイアログ | **同上** |
+| **Edit Train Tags** | タグ編集 UI（`addDOMWidget`）、Save 操作 | カスタム UI が表示・操作できない可能性 |
+| **Virtual Group** | キャンバス上のノード折りたたみ/展開 | グループ化 UI が動作しない可能性。ワークフロー実行への影響はなし |
+
+JS 拡張を使わないノード（**Normalize Prompt**、**Split Prompt**、**Load Images From Folder** など）は、Nodes 2.0 でも概ね問題なく利用できる想定です。Nodes 2.0 利用時は、上記ノードの動作を個別に確認してください。
 
 ## ライセンス
 
