@@ -12,6 +12,7 @@ NODE_CLASS_MAPPINGS = {
     "Split Prompt": SplitPromptNode,
     "Expand Wildcards": ExpandWildcardsNode,
     "Prompt To FileName": PromptToFileNameNode,
+    "Eval Prompts": EvalPromptsNode,
     "Any Pass": AnyPassNode,
     "Any Print": AnyPrintNode,
     "++1": IncrementNode,

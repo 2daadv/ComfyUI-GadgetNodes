@@ -227,13 +227,55 @@ def translate_to_english_by_google(text:str) -> str:
 def translate_bracketed_text(translation_engine:str, prompt:str, system_message:str, temperature:float, top_p:float) -> str:
     return re.sub(r"「\s*([^」]*)\s*」", lambda m: translate_to_english(translation_engine, m.group(1), system_message, temperature, top_p), prompt)
 
-def has_word(prompt:str, word:str) -> bool:
-    pattern = rf"(^|,\s*){word}($|\s*,)"
-    return bool(re.search(pattern, prompt))
+def has_word(prompt:str, word:str, escape:bool=True) -> bool:
+    if not word:
+        return False
+    stripped = word.strip()
+    if not stripped:
+        return False
+    pattern = rf"\b{re.escape(stripped) if escape else stripped}\b"
+    return bool(re.search(pattern, prompt, re.IGNORECASE))
 
-def has_any_words(prompt:str, words:tuple[str, ...]) -> bool:
-    pattern = rf"(^|,\s*)({'|'.join(words)})($|\s*,)"
-    return bool(re.search(pattern, prompt))
+def has_any_words(prompt:str, words:tuple[str, ...], escape:bool=True) -> bool:
+    if not words:
+        return False
+    words = [re.escape(w.strip()) if escape else w.strip() for w in words if w and w.strip()]
+    return bool(re.search(rf"\b(?:{'|'.join(words)})\b", prompt, re.IGNORECASE))
+
+def has_all_words(prompt: str, words: tuple[str, ...], escape:bool=True) -> bool:
+    if not words:
+        return True
+    for w in words:
+        stripped = w.strip()
+        if stripped:
+            word = re.escape(stripped) if escape else stripped
+            if word:
+                if not re.search(rf"\b{word}\b", prompt, re.IGNORECASE):
+                    return False
+    return True
 
 def defaultStr(value:str, defaultValue=""):
     return value.strip() if value else defaultValue
+
+def normalize_prompt(raw_prompt:str):
+    raw_prompt = defaultStr(raw_prompt)
+    if raw_prompt:
+        # コメントアウトを除去
+        prompt = re.sub(r"/\*.*?\*/", "", raw_prompt, flags=re.DOTALL)
+        prompt = re.sub(r"<!--.*?-->", "", prompt, flags=re.DOTALL)
+        prompt = re.sub(r"#.*$", "", prompt, flags=re.MULTILINE)
+
+        #各行の先頭・末尾の空白除去
+        prompt = re.sub(r"(^[ \t]+|[ \t]+$)", "", prompt, flags=re.MULTILINE)
+        #改行を消して1行に連結
+        prompt = re.sub(r"(\r?\n)+", " ", prompt)
+        #連続する空白を1つに
+        prompt = re.sub(r" +", " ", prompt)
+        #連続するカンマや、前後に空白のあるカンマをカンマ+空白にする
+        prompt = re.sub(r"(\s*,+\s*)+", ", ", prompt)
+        #ピリオドの直前が数字ではない場合のみ、ピリオドの直後に空白がない場合にスペースを挿入
+        prompt = re.sub(r"(?<!\d)\.(?=\S)", ". ", prompt)
+        #先頭・末尾の余分なカンマを除去
+        prompt = re.sub(r"(^, |, $)", "", prompt)
+        return prompt
+    return raw_prompt
