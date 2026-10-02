@@ -263,7 +263,7 @@ def normalize_prompt(raw_prompt:str):
         # コメントアウトを除去
         prompt = re.sub(r"/\*.*?\*/", "", raw_prompt, flags=re.DOTALL)
         prompt = re.sub(r"<!--.*?-->", "", prompt, flags=re.DOTALL)
-        prompt = re.sub(r"#.*$", "", prompt, flags=re.MULTILINE)
+        prompt = re.sub(r"(#|//).*$", "", prompt, flags=re.MULTILINE)
 
         #各行の先頭・末尾の空白除去
         prompt = re.sub(r"(^[ \t]+|[ \t]+$)", "", prompt, flags=re.MULTILINE)
