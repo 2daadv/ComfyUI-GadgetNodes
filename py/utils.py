@@ -277,5 +277,5 @@ def normalize_prompt(raw_prompt:str):
         prompt = re.sub(r"(?<!\d)\.(?=\S)", ". ", prompt)
         #先頭・末尾の余分なカンマを除去
         prompt = re.sub(r"(^, |, $)", "", prompt)
-        return prompt
+        return prompt.strip()
     return raw_prompt
