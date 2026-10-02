@@ -335,6 +335,9 @@ class EvalPromptsNode:
                 "positive": ("STRING", {"forceInput": True}),
                 "negative": ("STRING", {"forceInput": True}),
             },
+            "optional": {
+                "model_name": ("STRING", {"forceInput": True}),
+            }
         }
 
     RETURN_TYPES = ("STRING", "STRING")
@@ -342,27 +345,30 @@ class EvalPromptsNode:
     FUNCTION = "run"
     CATEGORY = CATEGORY_PROMPT
 
-    def run(self, positive, negative):
+    def run(self, positive, negative, model_name=""):
         # ifタグとその中身を丸ごと除去する正規表現（閉じタグなし含む）
         if_removal_pattern = re.compile(r'<if\b[^>]*>.*?(?:</if>|$)', re.DOTALL | re.IGNORECASE)
         # --- 【PASS 1: Positive 処理】 ---
         # スナップショット作成: Positive/Negative 両方から if タグと中身を全て除去
-        snapshot_pos_base = if_removal_pattern.sub('', positive)
-        snapshot_neg_base = if_removal_pattern.sub('', negative)
+        snapshot_pos_base = normalize_prompt(if_removal_pattern.sub('', positive))
+        snapshot_neg_base = normalize_prompt(if_removal_pattern.sub('', negative))
+        model_name = model_name.replace("\\", "/") if model_name else ""
 
         evaluator_pos = PromptEvaluator(
-            default_target="pos",
+            default_target=snapshot_pos_base,
             pos_snapshot=snapshot_pos_base,
-            neg_snapshot=snapshot_neg_base
+            neg_snapshot=snapshot_neg_base,
+            model_name = model_name
         )
         final_positive = normalize_prompt(evaluator_pos.process_text(positive))
 
         # --- 【PASS 2: Negative 処理】 ---
         # スナップショット作成: Positive は確定後のテキスト、Negative は if タグと中身を除去したテキスト
         evaluator_neg = PromptEvaluator(
-            default_target="neg",
+            default_target=snapshot_neg_base,
             pos_snapshot=final_positive,
-            neg_snapshot=snapshot_neg_base
+            neg_snapshot=snapshot_neg_base,
+            model_name = model_name
         )
         final_negative = normalize_prompt(evaluator_neg.process_text(negative))
 
@@ -370,14 +376,15 @@ class EvalPromptsNode:
 
 
 class PromptEvaluator:
-    def __init__(self, default_target, pos_snapshot, neg_snapshot):
+    def __init__(self, default_target:str, pos_snapshot:str, neg_snapshot:str, model_name:str):
         self.default_target = default_target
         self.pos_snapshot = pos_snapshot
         self.neg_snapshot = neg_snapshot
+        self.model_name = model_name
 
         # <if ...>中身</if> または 閉じタグなしの <if ...>中身
         self.if_pattern = re.compile(r'<if\b([^>]*)>(.*?)(?:</if>|$)', re.DOTALL | re.IGNORECASE)
-        # 属性抽出用 (例: all="..." または not pos)
+        # 属性抽出用 (例: all="..." または not model pos neg)
         self.attr_pattern = re.compile(r'(\b\w+\b)(?:=(?:"([^"]*)"|\'([^\']*)\'|(\S+)))?')
 
     def process_text(self, text):
@@ -386,10 +393,10 @@ class PromptEvaluator:
             content = match.group(2)
 
             # 属性のパース
-            attributes, flags = self._parse_attributes(attr_str)
+            attributes = self._parse_attributes(attr_str)
 
             # 条件評価
-            if self._evaluate_condition(attributes, flags):
+            if self._evaluate_condition(attributes):
                 return content
             else:
                 return ""
@@ -398,55 +405,56 @@ class PromptEvaluator:
 
     def _parse_attributes(self, attr_str):
         attributes = {}
-        flags = set()
 
         matches = self.attr_pattern.findall(attr_str)
         for key, val1, val2, val3 in matches:
             key_lower = key.lower()
             val = val1 or val2 or val3
-            if val:
-                attributes[key_lower] = val
-            else:
-                flags.add(key_lower)
+            attributes[key_lower] = val.strip() if val else ""
 
-        return attributes, flags
+        return attributes
 
-    def _evaluate_condition(self, attributes, flags):
+    def _evaluate_condition(self, attributes):
         # 判定対象のターゲット決定
-        if "pos" in flags:
+        if "pos" in attributes:
             target_text = self.pos_snapshot
-        elif "neg" in flags:
+        elif "neg" in attributes:
             target_text = self.neg_snapshot
         else:
-            target_text = self.pos_snapshot if self.default_target == "pos" else self.neg_snapshot
+            target_text = self.default_target
 
         # 条件パラメータの取得
+        model_param = attributes.get("model")
         all_param = attributes.get("all")
         any_param = attributes.get("any")
         matches_param = attributes.get("matches")
+        is_not = "not" in attributes
 
-        # 条件が1つもない場合は常に False (not があっても False)
-        if not (all_param or any_param or matches_param):
-            return False
+        conditions_met = [ True ]
+        # model 判定 (正規表現)
+        if model_param:
+            try:
+                conditions_met.append(bool(re.search(model_param, self.model_name, re.IGNORECASE)))
+            except re.error as e:
+                logger.warning(f"[GadgetNodes] if-model regex error at {model_param}: {e}")
+                conditions_met.append(False)
 
-        conditions_met = []
-
-        # 1. all 判定
+        # all 判定
         if all_param:
             items = tuple(all_param.split(','))
             all_result = has_all_words(target_text, items, True) if items else True
             conditions_met.append(all_result)
 
-        # 2. any 判定
+        # any 判定
         if any_param:
             items = tuple(any_param.split(','))
             any_result = has_any_words(target_text, items, True) if items else True
             conditions_met.append(any_result)
 
-        # 3. matches 判定 (正規表現)
+        # matches 判定 (正規表現)
         if matches_param:
             try:
-                match_result = bool(re.search(matches_param, target_text))
+                match_result = bool(re.search(matches_param, target_text, re.IGNORECASE))
             except re.error as e:
                 # 正規表現エラー時は False 扱い
                 logger.warning(f"[GadgetNodes] if-matches regex error at {matches_param}: {e}")
@@ -457,4 +465,4 @@ class PromptEvaluator:
         final_result = all(conditions_met)
 
         # [not] フラグ指定時は結果を反転
-        return not final_result if "not" in flags else final_result
+        return not final_result if is_not else final_result

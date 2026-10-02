@@ -167,7 +167,7 @@ yellow
 | **Translate Prompt** ⚠️ | 日本語などの入力を英語プロンプトに翻訳します。`「…」` で囲まれた部分のみ翻訳するモードにも対応。`Ctrl+Enter`（Mac は `Cmd+Enter`）で UI 上から即時翻訳できます。 |
 | **Analyze Prompt** | プロンプトを解析します。`☹` や `✌` が含まれると `facedetailer_enabled` や `handrefiner_enabled` を `True` にし、該当タグを除去します。特定の NSFW 関連語句がある場合、`explicit` / `uncensored` を自動付与します。 |
 | **Split Prompt** | ポジティブ/ネガティブを分離します。`, -(tag)` 形式をネガティブとして抽出し、残りをポジティブとして出力します。 |
-| **Eval Prompts** | ポジティブ/ネガティブを相互に参照し、条件分岐のロジックを適用します。 |
+| **Eval Prompts** | ポジティブ/ネガティブを相互に参照し、条件分岐のロジックを適用します。 モデル名による条件分岐も可能です。|
 | **Expand Wildcards** | dynamicprompts 形式のワイルドカードを組み合わせ展開し、プロンプトのリストを生成します。`max_variations` で上限、`auto_refresh` でファイル変更の再読み込みを制御します。 |
 | **Prompt To FileName** | プロンプトから保存用ファイル名を生成します。`%time`（`time_format` で書式指定）と `%prompt` プレースホルダに対応。 |
 | **Prompt Palette** ⚠️ | `prompt/*.yaml` をツリー UI で閲覧・選択するパレット。設定ファイルは上記「`prompt/*.yaml`」を参照。 |
@@ -186,6 +186,7 @@ yellow
 記法例:
 ```text
 [positive]
+<if model="Pony">score_9, score_8_up, score_7_up,</if>
 1girl, shool uniform,
 <if all="outdoors,rain" any="drenched,wet">wet clothes,</if>
 outdoors, rain, wet
@@ -193,29 +194,37 @@ outdoors, rain, wet
 [negative]
 worst quality,
 <if pos any="holding,grabbing">bad hands, bad fingers,</if>
+
+[model_name]
+anima-aesthetic-v1.0.safetensors
 ```
 
 → positive: `1girl, shool uniform, wet clothes, outdoors, rain, wet` / negative: `worst quality`
 
 構文:
-`<if [|not] [|pos|neg] all="outdoors,rain" any="drenched,wet" matches="(shirt|skirt)">wet clothes,</if>`
+`<if [|not] model="(Pony|XL)" [|pos|neg] all="outdoors,rain" any="drenched,wet" matches="(shirt|skirt)">wet clothes,</if>`
 * `[|not]`: `not`指定時は他の条件判定を全てANDした結果を反転します。
+* `model`: model_nameに対し、正規表現でマッチしているか判定します。
 * `[|pos|neg]`: `pos`=positiveを判定対象にします, `neg`=negativeを判定対象にします。
   * 未指定の場合、positive内は`pos`、negative内は`neg`を指定したときと同じ動作となります。
-* `all`: 値をカンマ区切りで分解後、全ての項目が判定対象に含まれている場合に有効。
-* `any`: 値をカンマ区切りで分解後、1つ以上の項目が判定対象に含まれている場合に有効。
-* `matches`: 判定対象に正規表現でマッチした場合に有効。マッチしなかった場合及び、正規表現エラー時は無効。
-* `all`, `any`, `matches`は組み合わせ可能(AND)です。
+* `all`: 値をカンマ区切りで分解後、全ての項目が判定対象に含まれているか判定します。
+* `any`: 値をカンマ区切りで分解後、1つ以上の項目が判定対象に含まれているか判定します。
+* `matches`: 判定対象に正規表現でマッチしているか判定します。
+* `model`, `all`, `any`, `matches`は組み合わせ可能(AND)です。
 
-制約:
+仕様と制約:
 * タグのネストはサポートしていません(動作保証外)。
 * `all`, `any`の判定は完全一致ではなく、単語検索です。また大小文字は区別しません。
   * 例: `any(arm)`
-    |`arm`|`, arm,`|`arm up`|`(arm:1.2)`|`arms`|`farmer`|
+    |`arm`|`, arm,`|`arm up`|`(arm:1.2)`|`arms up`|`farmer`|
     |-|-|-|-|-|-|
     |True|True|True|True|False|False|
-* `matches`では大小文字は区別しません。
-* 出力結果は自動的に`Normalize Prompt`同等の整形処理が行われます。
+* 正規表現でのマッチングは大小文字を区別しません。また、エラー発生時はマッチしない扱いとなります。
+* `pos`と`neg`を同時に指定した場合は、`pos`として扱います。
+* 入力及び出力結果には自動的に`Normalize Prompt`同等の整形処理が行われます。
+  * つまり、コメントアウトしている箇所は除去され、判定対象外となります。
+* positiveを評価する際は、`<if>～</if>`に囲まれていない部分が判定対象となります。
+* negativeを評価する際は、評価後のpositive及び、negativeの`<if>～</if>`に囲まれていない部分が判定対象となります。
 
 ### Gadget / core
 

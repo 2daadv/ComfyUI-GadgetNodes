@@ -1,6 +1,6 @@
 [project]
 name = "ComfyUI-GadgetNodes"
-version = "0.0.4"
+version = "0.0.5"
 description = "A collection of utility nodes for ComfyUI to streamline workflows, including prompt editing, translation, model preset management, image preprocessing, and metadata editing."
 license = { file = "LICENSE" }
 readme = "README.md"
