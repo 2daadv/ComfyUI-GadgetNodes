@@ -263,7 +263,7 @@ class CropDialog {
 
         const selectAllBtn = document.createElement('button');
         selectAllBtn.className = 'crop-btn crop-btn-secondary';
-        selectAllBtn.innerText = 'Select ALL';
+        selectAllBtn.innerText = 'Select All';
         selectAllBtn.onclick = () => {
             this.results[this.currentIndex].ratio = "Any";
             Object.assign(this.results[this.currentIndex], { x: 0, y: 0, w: 1, h: 1 });
@@ -524,11 +524,11 @@ app.registerExtension({
         
         const leftBtns = document.createElement("div");
         leftBtns.className = "sel-footer-btns";
-        const btnAll = document.createElement("button"); btnAll.className="sel-btn"; btnAll.innerText="全選択";
+        const btnAll = document.createElement("button"); btnAll.className="sel-btn"; btnAll.innerText="Select All";
         btnAll.onclick = () => { images.forEach((_,i)=>selected.add(i)); render(); };
-        const btnNone = document.createElement("button"); btnNone.className="sel-btn"; btnNone.innerText="全解除";
+        const btnNone = document.createElement("button"); btnNone.className="sel-btn"; btnNone.innerText="Clear All";
         btnNone.onclick = () => { selected.clear(); render(); };
-        const btnInv = document.createElement("button"); btnInv.className="sel-btn"; btnInv.innerText="選択反転";
+        const btnInv = document.createElement("button"); btnInv.className="sel-btn"; btnInv.innerText="Inverse Selection";
         btnInv.onclick = () => {
             const next = new Set();
             images.forEach((_,i) => { if(!selected.has(i)) next.add(i); });
