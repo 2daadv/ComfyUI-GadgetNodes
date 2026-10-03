@@ -116,8 +116,8 @@ class LoadCheckpointOrDiffusionModelNode:
                 "vae_name": (["None"] + folder_paths.get_filename_list("vae"),),
             },
         }
-    RETURN_TYPES = ("MODEL", "CLIP", "VAE")
-    RETURN_NAMES = ("model", "clip", "vae")
+    RETURN_TYPES = ("MODEL", "CLIP", "VAE", "STRING")
+    RETURN_NAMES = ("model", "clip", "vae", "model_name")
     FUNCTION = "run"
     CATEGORY = CATEGORY_MODEL
 
@@ -166,7 +166,7 @@ class LoadCheckpointOrDiffusionModelNode:
             vae.throw_exception_if_invalid()
             vae.patcher.cached_patcher_init = (comfy.sd.load_vae_patcher, (vae_path, metadata, None))
 
-        return (model, clip, vae)
+        return (model, clip, vae, model_name,)
 
 #=============================================================================
 class SDLoraInfoEditorNode:

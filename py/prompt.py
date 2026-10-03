@@ -117,7 +117,13 @@ class AnalyzePromptNode:
             handrefiner_enabled = "✌" in prompt
             if handrefiner_enabled:
                 prompt = prompt.replace("✌", "")
-            if has_any_words(prompt, ("(nude|nipples?|pussy|anus|penis)", "(fellatio|irrumatio|deepthroat)", "(foot|hand|blow)job", "(sex|masturbation)"), False):
+            if has_any_words(prompt, (
+                "nude|naked|topless|bottomless|no panties",
+                "nipples?|pussy|vaginal?|anus|anal|penis|cock",
+                "fellatio|irrumatio|deepthroat|\w+job|paizuri|masturbation",
+                "sex|\w*fuck|fucked|raped?|raping",
+                "precum|cum|bukkake|sperm|semen",
+                ), False):
                 if not has_word(prompt, "explicit", False):
                     prompt = prompt + ", explicit"
                 if not has_word(prompt, "uncensored", False):
@@ -234,6 +240,7 @@ class ExpandWildcardsNode:
 
         return (prompts, len(prompts),)
 
+default_remove_matches = "(?:masterpiece|(?:\w+[ _])*(?:detailed|quality|aesthetic|realistic)(?:[ _]\w+)*|score_\w+|highres|absurdres|newest|safe|sensitive|n?sfw|explicit|(?:un)?censored|anime[ _](?:screenshot|coloring)|official[ _]art)"
 class PromptToFileNameNode:
     @classmethod
     def INPUT_TYPES(s):
@@ -243,6 +250,9 @@ class PromptToFileNameNode:
                 "file_name_format": ("STRING", {"default": "%time-%prompt"}),
                 "time_format": ("STRING", {"default": "%Y%m%d%H%M%S"}),
                 "max_length": ("INT", {"default": 175, "min": 20, "max": 260}),
+            },
+            "optional": {
+                "remove_matches": ("STRING", {"default": default_remove_matches}),
             }
         }
     RETURN_TYPES = ("STRING",)
@@ -251,14 +261,16 @@ class PromptToFileNameNode:
     OUTPUT_NODE = False
     CATEGORY = CATEGORY_PROMPT
 
-    def run(self, prompt:str, file_name_format:str, time_format:str, max_length:int=175):
+    def run(self, prompt:str, file_name_format:str, time_format:str, max_length:int=175, remove_matches:str=default_remove_matches):
         # 1. プロンプトのサニタイズ処理
         clean_prompt = "ComfyUI"
         if prompt:
-            result = prompt.replace(", ", ",")
+            result = re.sub(rf"\b{remove_matches}\b", "", prompt, flags=re.IGNORECASE) if remove_matches else prompt
+            result = re.sub(r"(?:\s*,\s*)+", ",", result)
+            result = re.sub(r"^\s*,\s*|\s*,\s*$", "", result)
             # ファイル名に使えない文字や制御文字を置換
-            result = re.sub(r'[\\/:*?"<>|\n\r\t]', "_", result, flags=re.MULTILINE)
-            clean_prompt = result
+            result = re.sub(r'[\\/:*?"<>|\n\r\t]', "_", result)
+            clean_prompt = result.strip()
 
         # 2. 現在時刻のフォーマット変換
         current_time = datetime.now().strftime(time_format)

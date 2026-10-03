@@ -263,19 +263,19 @@ def normalize_prompt(raw_prompt:str):
         # コメントアウトを除去
         prompt = re.sub(r"/\*.*?\*/", "", raw_prompt, flags=re.DOTALL)
         prompt = re.sub(r"<!--.*?-->", "", prompt, flags=re.DOTALL)
-        prompt = re.sub(r"(#|//).*$", "", prompt, flags=re.MULTILINE)
+        prompt = re.sub(r"(?:#|//).*$", "", prompt, flags=re.MULTILINE)
 
         #各行の先頭・末尾の空白除去
-        prompt = re.sub(r"(^[ \t]+|[ \t]+$)", "", prompt, flags=re.MULTILINE)
+        prompt = re.sub(r"(?:^[ \t]+|[ \t]+$)", "", prompt, flags=re.MULTILINE)
         #改行を消して1行に連結
-        prompt = re.sub(r"(\r?\n)+", " ", prompt)
+        prompt = re.sub(r"(?:\r?\n)+", " ", prompt)
         #連続する空白を1つに
         prompt = re.sub(r" +", " ", prompt)
         #連続するカンマや、前後に空白のあるカンマをカンマ+空白にする
-        prompt = re.sub(r"(\s*,+\s*)+", ", ", prompt)
+        prompt = re.sub(r"(?:\s*,+\s*)+", ", ", prompt)
         #ピリオドの直前が数字ではない場合のみ、ピリオドの直後に空白がない場合にスペースを挿入
         prompt = re.sub(r"(?<!\d)\.(?=\S)", ". ", prompt)
         #先頭・末尾の余分なカンマを除去
-        prompt = re.sub(r"(^, |, $)", "", prompt)
+        prompt = re.sub(r"^(?:,\s*)+|(?:\s*,)+$", "", prompt)
         return prompt.strip()
     return raw_prompt
